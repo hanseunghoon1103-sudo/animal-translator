@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>동물소리 번역기 🐶🐱</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #121212;
+      color: #ffffff;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* 메인 카메라인 커스텀 뷰 */
+    .app-container {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      height: 80vh;
+      background-color: #000;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* 시작하기 오버레이 레이어 */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .start-btn {
+      background: #ff4757;
+      color: white;
+      border: none;
+      padding: 15px 32px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .start-btn:hover {
+      background: #ff6b81;
+      transform: scale(1.05);
+    }
+
+    /* 하단 번역 자막 영역 */
+    .caption-box {
+      position: absolute;
+      bottom: 30px;
+      left: 5%;
+      width: 90%;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 16px 20px;
+      text-align: center;
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .caption-text {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #ffeaa7;
+      line-height: 1.4;
+      word-break: keep-all;
+    }
+
+    /* 소리 반응 게이지 바 */
+    .audio-meter {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 120px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .audio-bar {
+      width: 0%;
+      height: 100%;
+      background: #2ed573;
+      transition: width 0.1s ease;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- 시작 화면 오버레이 -->
+    <div class="overlay" id="startOverlay">
+      <h2>🐾 실시간 동물소리 번역기</h2>
+      <p style="margin-top: 10px; color: #ccc; font-size: 0.9rem;">
+        마이크와 카메라 권한을 허용하고<br>반려동물의 울음소리를 들어보세요!
+      </p>
+      <button class="start-btn" id="startBtn">번역 시작하기</button>
+    </div>
+
+    <!-- 카메라 화면 -->
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <!-- 소리 크기 시각화 바 -->
+    <div class="audio-meter">
+      <div class="audio-bar" id="audioBar"></div>
+    </div>
+
+    <!-- 실시간 자막 창 -->
+    <div class="caption-box">
+      <p class="caption-text" id="captionText">소리를 기다리는 중...</p>
+    </div>
+  </div>
+
+  <script>
+    // 1. 유머 번역 텍스트 프리셋
+    const mockTranslations = [
+      "집사야, 밥그릇이 반이나 비었다. 당장 채워라.",
+      "방금 날 본 거야? 응? 방금 날 본 거냐구!",
+      "어휴... 인간아, 상전 모시는 게 쉬운 줄 아냐?",
+      "지금 날 찍고 있는 거냐? 츄르라도 주고 찍어라.",
+      "졸린데 자꾸 왜 부르는 거야... (귀찮)",
+      "사랑해! 근데 간식 주면 더 사랑할 수 있어!",
+      "소생의 기분이 몹시 불쾌하오. 저리 가시오.",
+      "어디 갔다 이제 왔냐! 기다리다 목 빠지는 줄 알았다구!"
+    ];
+
+    const webcam = document.getElementById('webcam');
+    const startOverlay = document.getElementById('startOverlay');
+    const startBtn = document.getElementById('startBtn');
+    const captionText = document.getElementById('captionText');
+    const audioBar = document.getElementById('audioBar');
+
+    let audioContext;
+    let analyser;
+    let microphone;
+    let isCooldown = false; // 연속 발동 방지용 쿨다운
+
+    // 감지 감도 설정 (0~255 범위, 높을수록 큰 소리에만 반응)
+    const SOUND_THRESHOLD = 45; 
+
+    // 2. 시작 버튼 클릭 시 카메라 및 마이크 권한 요청
+    startBtn.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }, // 기본 후면 카메라 (모바일 기준)
+          audio: true
+        });
+
+        webcam.srcObject = stream;
+        startOverlay.style.display = 'none';
+
+        // 오디오 분석 세팅
+        initAudioAnalysis(stream);
+      } catch (err) {
+        alert('카메라 및 마이크 권한이 필요합니다: ' + err.message);
+      }
+    });
+
+    // 3. Web Audio API를 활용한 마이크 음량 감지
+    function initAudioAnalysis(stream) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioContext.createAnalyser();
+      microphone = audioContext.createMediaStreamSource(stream);
+
+      analyser.fftSize = 256;
+      microphone.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function detectSound() {
+        analyser.getByteFrequencyData(dataArray);
+
+        // 데시벨(평균 음량) 계산
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+
+        // UI에 소리 크기 게이지 표시
+        audioBar.style.width = Math.min(100, (average / 100) * 100) + '%';
+
+        // 일정 임계값 이상의 소리가 감지되었을 때 번역 실행
+        if (average > SOUND_THRESHOLD && !isCooldown) {
+          triggerTranslation();
+        }
+
+        requestAnimationFrame(detectSound);
+      }
+
+      detectSound();
+    }
+
+    // 4. 소리가 입력되었을 때 무작위 번역 텍스트 출력
+    function triggerTranslation() {
+      isCooldown = true;
+
+      // 무작위 텍스트 뽑기
+      const randomIndex = Math.floor(Math.random() * mockTranslations.length);
+      const randomText = mockTranslations[randomIndex];
+
+      captionText.style.opacity = '0';
+
+      setTimeout(() => {
+        captionText.innerText = `💬 "${randomText}"`;
+        captionText.style.opacity = '1';
+      }, 150);
+
+      // 3초간 쿨다운 (연속으로 자막이 바뀌는 것 방지)
+      setTimeout(() => {
+        isCooldown = false;
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
