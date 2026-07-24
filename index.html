@@ -247,16 +247,16 @@
 
       statusHeader.innerText = 'AI Scanning...';
 
-      // ⚡ 화면 선명도 향상을 위해 캡처 해상도 상향 (400x300 / Quality 0.6)
-      canvas.width = 400;
-      canvas.height = 300;
+      // 📸 고화질 선명도 캡처 (640x480 / 품질 0.8)
+      canvas.width = 640;
+      canvas.height = 480;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      lastDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      lastDataUrl = canvas.toDataURL('image/jpeg', 0.8);
       const base64Image = lastDataUrl.split(',')[1];
 
-      let nextDelay = 300;
+      let nextDelay = 500;
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -273,15 +273,15 @@
           statusHeader.innerText = 'Translated.';
           statusLine.style.display = 'none';
           await addNewTranslationItem(data.breed, data.translation);
-          nextDelay = 800;
+          nextDelay = 1000;
 
         } else {
           if (data.isNoAnimal) {
             statusHeader.innerText = 'Searching..';
             statusLine.style.display = 'block';
-            // ✂️ "즉시 다음 스캔 진행" 문구 완벽 삭제!
-            statusLine.innerText = '> [탐지 중...] 화면에 동물이 탐지되지 않았습니다.';
-            nextDelay = 200;
+            // ✂️ 요청하신 단축 문구 적용!
+            statusLine.innerText = '> 화면에 동물이 탐지되지 않았습니다.';
+            nextDelay = 1000; // 카메라 초점 확보를 위해 1초 대기
           } else {
             statusHeader.innerText = 'Ready..';
             statusLine.style.display = 'block';
