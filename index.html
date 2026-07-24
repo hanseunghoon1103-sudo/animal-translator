@@ -191,7 +191,6 @@
         return;
       }
 
-      // 화면 및 데이터 리셋
       historyContainer.innerHTML = '';
       statusLine.style.display = 'block';
       statusLine.innerText = '> 동물을 카메라에 비춰주세요...';
@@ -217,7 +216,7 @@
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
 
-        // 🔥 첫 번째 스캔 시작!
+        // 🔥 카메라가 켜지자마자 1차 스캔 즉시 실행!
         triggerChainedScan();
 
       } catch (err) {
@@ -244,13 +243,12 @@
       statusHeader.innerText = 'Ready..';
     }
 
-    // 🔄 [핵심 연쇄 스캔 함수] 분석 ➔ 출력 ➔ 다음 분석 자동 호출
+    // 🔄 [2단계 고속 필터링 연쇄 스캔]
     async function triggerChainedScan() {
       if (!isLiveActive || video.videoWidth === 0) return;
 
       statusHeader.innerText = 'AI Scanning...';
 
-      // 1. 현재 카메라 화면 캡처
       canvas.width = 320;
       canvas.height = 240;
       const ctx = canvas.getContext('2d');
@@ -259,8 +257,9 @@
       lastDataUrl = canvas.toDataURL('image/jpeg', 0.5);
       const base64Image = lastDataUrl.split(',')[1];
 
+      let nextDelay = 500; // 기본 대기 시간
+
       try {
-        // 2. AI 서버 분석 요청 (응답이 올 때까지 await 대기)
         const response = await fetch(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
@@ -269,23 +268,27 @@
 
         const data = await response.json();
 
-        // 중간에 사용자가 [중지]를 눌렀다면 결과 출력 없이 중단
         if (!isLiveActive) return;
 
-        // 3. 분석 결과 화면 출력
         if (data.success) {
+          // 🟢 2단계 통과: 동물 발견 및 번역 성공!
           statusHeader.innerText = 'Translated.';
           statusLine.style.display = 'none';
-          // 타자기 애니메이션이 완전히 끝날 때까지 대기(await)
           await addNewTranslationItem(data.breed, data.translation);
+          nextDelay = 800; // 사용자가 번역을 읽을 수 있도록 0.8초 여유
+
         } else {
-          statusHeader.innerText = 'Ready..';
           if (data.isNoAnimal) {
+            // ⚡ 1단계 차단: 동물이 없으면 0.1초 만에 초고속 다음 스캔 패스!
+            statusHeader.innerText = 'Searching..';
             statusLine.style.display = 'block';
-            statusLine.innerText = '> [탐지 중...] 화면에 동물이 탐지되지 않았습니다.';
-          } else if (data.error) {
+            statusLine.innerText = '> [탐지 중...] 동물이 없습니다. 즉시 다음 스캔 진행 >>';
+            nextDelay = 100; // 0.1초(100ms) 뒤 즉시 다음 캡처!
+          } else {
+            statusHeader.innerText = 'Ready..';
             statusLine.style.display = 'block';
-            statusLine.innerText = '> [오류] ' + data.error;
+            statusLine.innerText = '> [오류] ' + (data.error || "재시도 중...");
+            nextDelay = 1500; // 에러 시에는 서버 보호를 위해 1.5초 대기
           }
         }
 
@@ -295,16 +298,16 @@
           statusHeader.innerText = 'Ready..';
           statusLine.style.display = 'block';
           statusLine.innerText = '> [연결 재시도 중...]';
+          nextDelay = 1000;
         }
       } finally {
-        // 4. 🔥 [핵심] 모든 처리(출력 포함)가 끝난 후, 0.5초 눈짓할 시간만 주고 '다음 스캔' 즉시 실행!
+        // 🔥 상황별(동물 없음=0.1초 / 번역 완료=0.8초) 맞춤 지연 시간으로 다음 스캔 트리거!
         if (isLiveActive) {
-          autoScanTimeout = setTimeout(triggerChainedScan, 500);
+          autoScanTimeout = setTimeout(triggerChainedScan, nextDelay);
         }
       }
     }
 
-    // 최신 항목을 맨 위에 추가하고 타자 애니메이션을 수행하는 함수
     async function addNewTranslationItem(breed, translation) {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'terminal-line-item';
@@ -322,7 +325,6 @@
       historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
       terminalBody.scrollTop = 0;
 
-      // 타자기 타격 효과
       await typeText(breedSpan, `> [${breed}]`);
       await typeText(transSpan, `"${translation}"`);
     }
