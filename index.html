@@ -169,7 +169,7 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    const APPS_SCRIPT_URL = '[https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec](https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec)';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
     const frozenImg = document.getElementById('frozen-img');
@@ -180,7 +180,6 @@
     const terminalBody = document.getElementById('terminal-body');
 
     let isLiveActive = false;
-    let isProcessing = false;
     let autoScanTimeout = null;
     let lastDataUrl = '';
 
@@ -192,6 +191,7 @@
         return;
       }
 
+      // 화면 및 데이터 리셋
       historyContainer.innerHTML = '';
       statusLine.style.display = 'block';
       statusLine.innerText = '> 동물을 카메라에 비춰주세요...';
@@ -217,8 +217,8 @@
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
 
-        // 순차 스캔 루프 개시
-        scheduleNextScan(1000);
+        // 🔥 첫 번째 스캔 시작!
+        triggerChainedScan();
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
@@ -226,6 +226,8 @@
     }
 
     function stopCamera() {
+      isLiveActive = false;
+
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
       }
@@ -236,33 +238,19 @@
         frozenImg.style.display = 'block';
       }
 
-      isLiveActive = false;
-      isProcessing = false;
       const btn = document.getElementById('btn-camera');
       btn.innerText = '🎥 실시간 라이브 카메라 시작';
       btn.classList.remove('active');
       statusHeader.innerText = 'Ready..';
     }
 
-    // 📌 이전 작업 완료 후 넉넉히(4초) 여유를 두고 다음 스캔 호출
-    function scheduleNextScan(delayMs = 4000) {
-      if (autoScanTimeout) clearTimeout(autoScanTimeout);
-      if (isLiveActive) {
-        autoScanTimeout = setTimeout(() => {
-          captureCurrentFrameAndSend();
-        }, delayMs);
-      }
-    }
+    // 🔄 [핵심 연쇄 스캔 함수] 분석 ➔ 출력 ➔ 다음 분석 자동 호출
+    async function triggerChainedScan() {
+      if (!isLiveActive || video.videoWidth === 0) return;
 
-    async function captureCurrentFrameAndSend() {
-      if (!isLiveActive || isProcessing || video.videoWidth === 0) {
-        scheduleNextScan(2000);
-        return;
-      }
-
-      isProcessing = true;
       statusHeader.innerText = 'AI Scanning...';
 
+      // 1. 현재 카메라 화면 캡처
       canvas.width = 320;
       canvas.height = 240;
       const ctx = canvas.getContext('2d');
@@ -272,6 +260,7 @@
       const base64Image = lastDataUrl.split(',')[1];
 
       try {
+        // 2. AI 서버 분석 요청 (응답이 올 때까지 await 대기)
         const response = await fetch(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
@@ -280,11 +269,14 @@
 
         const data = await response.json();
 
+        // 중간에 사용자가 [중지]를 눌렀다면 결과 출력 없이 중단
         if (!isLiveActive) return;
 
+        // 3. 분석 결과 화면 출력
         if (data.success) {
           statusHeader.innerText = 'Translated.';
           statusLine.style.display = 'none';
+          // 타자기 애니메이션이 완전히 끝날 때까지 대기(await)
           await addNewTranslationItem(data.breed, data.translation);
         } else {
           statusHeader.innerText = 'Ready..';
@@ -296,18 +288,23 @@
             statusLine.innerText = '> [오류] ' + data.error;
           }
         }
+
       } catch (err) {
         console.error("통신 에러:", err);
-        statusHeader.innerText = 'Ready..';
-        statusLine.style.display = 'block';
-        statusLine.innerText = '> [통신 연결 재시도 중...]';
+        if (isLiveActive) {
+          statusHeader.innerText = 'Ready..';
+          statusLine.style.display = 'block';
+          statusLine.innerText = '> [연결 재시도 중...]';
+        }
       } finally {
-        isProcessing = false;
-        // 스캔 완료 후 4초 뒤에 차분하게 다음 프레임 전송
-        scheduleNextScan(4000);
+        // 4. 🔥 [핵심] 모든 처리(출력 포함)가 끝난 후, 0.5초 눈짓할 시간만 주고 '다음 스캔' 즉시 실행!
+        if (isLiveActive) {
+          autoScanTimeout = setTimeout(triggerChainedScan, 500);
+        }
       }
     }
 
+    // 최신 항목을 맨 위에 추가하고 타자 애니메이션을 수행하는 함수
     async function addNewTranslationItem(breed, translation) {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'terminal-line-item';
@@ -325,6 +322,7 @@
       historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
       terminalBody.scrollTop = 0;
 
+      // 타자기 타격 효과
       await typeText(breedSpan, `> [${breed}]`);
       await typeText(transSpan, `"${translation}"`);
     }
