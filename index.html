@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>실시간 AR 동물소리 번역기</title>
+  <title>LIVE CAM Animal Decoder</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -121,14 +121,14 @@
       background-color: #7ee787; margin-left: 4px;
       vertical-align: middle; animation: blink 0.8s infinite;
     }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
     canvas { display: none; }
   </style>
 </head>
 <body>
 
-  <div class="header-title">📡 LIVE AR ANIMAL DECODER</div>
+  <div class="header-title">📡 LIVE CAM Animal Decoder</div>
 
   <div class="camera-container">
     <video id="webcam" autoplay playsinline muted></video>
@@ -146,10 +146,10 @@
         <span class="dot dot-yellow"></span>
         <span class="dot dot-green"></span>
       </div>
-      <div class="terminal-title">AI_STREAM_SCANNER_v2.0</div>
+      <div class="terminal-title">BEHAVIOR_DECODER_v2.5</div>
     </div>
     <div class="terminal-body">
-      <div id="status-text" class="terminal-line status-line">> 상단 버튼을 눌러 실시간 스캔을 시작하세요...</div>
+      <div id="status-text" class="terminal-line status-line">> 버튼을 눌러 동물의 실시간 보디랭귀지 스캔을 시작하세요...</div>
       <div id="species-info-typed" class="terminal-line species-line"></div>
       <div id="animal-name-typed" class="terminal-line animal-line"></div>
       <div id="translation-text-typed" class="terminal-line translation-line"></div>
@@ -160,8 +160,10 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    // ⚠️ 여기에 앱스크립트 배포 URL을 입력해 주세요!
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/library/d/1fCTakbiJnQWoZ7GL1MwK3gNEe0CzGJUfG8PFg7VyvXhcQrPLqWw12Z06/33';
+    // =========================================================================
+    // 📌 [고정] 구글 앱스크립트 백엔드 배포 URL
+    // =========================================================================
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('frame-canvas');
@@ -178,7 +180,7 @@
       }
 
       try {
-        document.getElementById('status-text').innerText = '> [CAMERA_CONNECTING] 스마트폰 카메라 연결 중...';
+        document.getElementById('status-text').innerText = '> [CAMERA_CONNECTING] 라이브 카메라 연결 중...';
 
         let stream;
         try {
@@ -196,7 +198,7 @@
         isLiveActive = true;
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
-        document.getElementById('status-text').innerText = '> [LIVE_ONLINE] 카메라가 활성화되었습니다. 동물을 비춰주세요...';
+        document.getElementById('status-text').innerText = '> [LIVE_ONLINE] 동물을 비추면 표정과 행동을 정밀 분석합니다...';
 
         startAutoScanLoop();
 
@@ -226,12 +228,12 @@
         if (isLiveActive && !isProcessing && video.videoWidth > 0) {
           captureCurrentFrameAndSend();
         }
-      }, 3000);
+      }, 3500);
     }
 
     async function captureCurrentFrameAndSend() {
       isProcessing = true;
-      document.getElementById('status-text').innerText = '> [AI SCANNING...] 현재 라이브 화면 분석 중...';
+      document.getElementById('status-text').innerText = '> [AI SCANNING...] 표정 및 몸짓 보디랭귀지 분석 중...';
 
       canvas.width = 320;
       canvas.height = 240;
@@ -267,7 +269,7 @@
         }
       } catch (err) {
         console.error(err);
-        document.getElementById('status-text').innerText = '> [ERROR] 서버 통신 실패';
+        document.getElementById('status-text').innerText = '> [ERROR] 서버 통신 실패 (앱스크립트 배포 권한을 확인하세요)';
       } finally {
         isProcessing = false;
       }
