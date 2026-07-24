@@ -181,7 +181,7 @@
 
     let isLiveActive = false;
     let isProcessing = false;
-    let autoScanInterval = null;
+    let autoScanTimeout = null;
     let lastDataUrl = '';
 
     async function startLiveCamera() {
@@ -217,7 +217,8 @@
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
 
-        startAutoScanLoop();
+        // 순차 스캔 루프 개시
+        scheduleNextScan(1000);
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
@@ -228,7 +229,7 @@
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
       }
-      if (autoScanInterval) clearInterval(autoScanInterval);
+      if (autoScanTimeout) clearTimeout(autoScanTimeout);
 
       if (lastDataUrl) {
         frozenImg.src = lastDataUrl;
@@ -243,17 +244,22 @@
       statusHeader.innerText = 'Ready..';
     }
 
-    // ⚡ 안정적인 AI 처리 시간 확보를 위해 주기를 3.5초로 변경
-    function startAutoScanLoop() {
-      if (autoScanInterval) clearInterval(autoScanInterval);
-      autoScanInterval = setInterval(() => {
-        if (isLiveActive && !isProcessing && video.videoWidth > 0) {
+    // 📌 이전 작업 완료 후 넉넉히(4초) 여유를 두고 다음 스캔 호출
+    function scheduleNextScan(delayMs = 4000) {
+      if (autoScanTimeout) clearTimeout(autoScanTimeout);
+      if (isLiveActive) {
+        autoScanTimeout = setTimeout(() => {
           captureCurrentFrameAndSend();
-        }
-      }, 3500);
+        }, delayMs);
+      }
     }
 
     async function captureCurrentFrameAndSend() {
+      if (!isLiveActive || isProcessing || video.videoWidth === 0) {
+        scheduleNextScan(2000);
+        return;
+      }
+
       isProcessing = true;
       statusHeader.innerText = 'AI Scanning...';
 
@@ -276,31 +282,29 @@
 
         if (!isLiveActive) return;
 
-        if (data.error) {
-          statusHeader.innerText = 'Ready..';
-          if (data.error.message === "NO_ANIMAL") {
-            statusLine.style.display = 'block';
-            statusLine.innerText = '> [탐지 실패] 화면에 동물이 탐지되지 않았습니다.';
-          }
-        } else {
+        if (data.success) {
           statusHeader.innerText = 'Translated.';
           statusLine.style.display = 'none';
-
-          // 🛡️ 마크다운 문법(```json ... ```) 제거 로직 추가
-          let rawText = data.candidates[0].content.parts[0].text;
-          rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-          const resultJson = JSON.parse(rawText);
-
-          if (resultJson.breed && resultJson.translation) {
-            await addNewTranslationItem(resultJson.breed, resultJson.translation);
+          await addNewTranslationItem(data.breed, data.translation);
+        } else {
+          statusHeader.innerText = 'Ready..';
+          if (data.isNoAnimal) {
+            statusLine.style.display = 'block';
+            statusLine.innerText = '> [탐지 중...] 화면에 동물이 탐지되지 않았습니다.';
+          } else if (data.error) {
+            statusLine.style.display = 'block';
+            statusLine.innerText = '> [오류] ' + data.error;
           }
         }
       } catch (err) {
-        console.error("분석 중 에러 발생:", err);
+        console.error("통신 에러:", err);
         statusHeader.innerText = 'Ready..';
+        statusLine.style.display = 'block';
+        statusLine.innerText = '> [통신 연결 재시도 중...]';
       } finally {
         isProcessing = false;
+        // 스캔 완료 후 4초 뒤에 차분하게 다음 프레임 전송
+        scheduleNextScan(4000);
       }
     }
 
