@@ -202,7 +202,7 @@
         let stream;
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" }, width: { ideal: 480 }, height: { ideal: 360 } },
+            video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
             audio: false
           });
         } catch (fallbackErr) {
@@ -216,7 +216,6 @@
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
 
-        // 🔥 카메라가 켜지자마자 1차 스캔 즉시 실행!
         triggerChainedScan();
 
       } catch (err) {
@@ -243,21 +242,21 @@
       statusHeader.innerText = 'Ready..';
     }
 
-    // 🔄 [2단계 고속 필터링 연쇄 스캔]
     async function triggerChainedScan() {
       if (!isLiveActive || video.videoWidth === 0) return;
 
       statusHeader.innerText = 'AI Scanning...';
 
-      canvas.width = 320;
-      canvas.height = 240;
+      // ⚡ 화면 선명도 향상을 위해 캡처 해상도 상향 (400x300 / Quality 0.6)
+      canvas.width = 400;
+      canvas.height = 300;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      lastDataUrl = canvas.toDataURL('image/jpeg', 0.5);
+      lastDataUrl = canvas.toDataURL('image/jpeg', 0.6);
       const base64Image = lastDataUrl.split(',')[1];
 
-      let nextDelay = 500; // 기본 대기 시간
+      let nextDelay = 300;
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -271,24 +270,23 @@
         if (!isLiveActive) return;
 
         if (data.success) {
-          // 🟢 2단계 통과: 동물 발견 및 번역 성공!
           statusHeader.innerText = 'Translated.';
           statusLine.style.display = 'none';
           await addNewTranslationItem(data.breed, data.translation);
-          nextDelay = 800; // 사용자가 번역을 읽을 수 있도록 0.8초 여유
+          nextDelay = 800;
 
         } else {
           if (data.isNoAnimal) {
-            // ⚡ 1단계 차단: 동물이 없으면 0.1초 만에 초고속 다음 스캔 패스!
             statusHeader.innerText = 'Searching..';
             statusLine.style.display = 'block';
-            statusLine.innerText = '> [탐지 중...] 동물이 없습니다. 즉시 다음 스캔 진행 >>';
-            nextDelay = 100; // 0.1초(100ms) 뒤 즉시 다음 캡처!
+            // ✂️ "즉시 다음 스캔 진행" 문구 완벽 삭제!
+            statusLine.innerText = '> [탐지 중...] 화면에 동물이 탐지되지 않았습니다.';
+            nextDelay = 200;
           } else {
             statusHeader.innerText = 'Ready..';
             statusLine.style.display = 'block';
             statusLine.innerText = '> [오류] ' + (data.error || "재시도 중...");
-            nextDelay = 1500; // 에러 시에는 서버 보호를 위해 1.5초 대기
+            nextDelay = 1500;
           }
         }
 
@@ -301,7 +299,6 @@
           nextDelay = 1000;
         }
       } finally {
-        // 🔥 상황별(동물 없음=0.1초 / 번역 완료=0.8초) 맞춤 지연 시간으로 다음 스캔 트리거!
         if (isLiveActive) {
           autoScanTimeout = setTimeout(triggerChainedScan, nextDelay);
         }
