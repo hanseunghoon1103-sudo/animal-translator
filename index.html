@@ -24,6 +24,8 @@
       color: #38edf8;
       text-shadow: 0 0 10px rgba(56, 237, 248, 0.3);
     }
+    
+    /* 📹 실시간 카메라 & 정지 영상 레이어 */
     .camera-container {
       position: relative;
       width: 100%;
@@ -36,6 +38,15 @@
       box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
     }
     #webcam { width: 100%; height: 100%; object-fit: cover; }
+    #frozen-img {
+      display: none;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      position: absolute;
+      top: 0; left: 0;
+      z-index: 5;
+    }
     .camera-overlay {
       position: absolute;
       top: 12px; left: 12px;
@@ -76,6 +87,7 @@
     }
     .btn-start-camera.active { background-color: #da3633; box-shadow: none; }
 
+    /* 🖤 터미널 스크롤 가능 영역 */
     #translator-terminal {
       width: 100%;
       max-width: 500px;
@@ -103,16 +115,26 @@
       position: absolute; left: 50%; transform: translateX(-50%);
       font-family: monospace; font-size: 0.8rem; color: #38edf8; font-weight: bold;
     }
+    
+    /* 📜 스크롤 가능한 본문 영역 (최신 항목이 위로 쌓임) */
     .terminal-body {
       padding: 16px;
       font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       line-height: 1.6;
-      min-height: 120px;
+      height: 220px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
-    .terminal-line { margin-bottom: 8px; word-break: break-all; }
-    .animal-line { color: #d2a8ff; font-weight: bold; }
-    .translation-line { color: #7ee787; font-size: 1.1rem; font-weight: bold; }
+    .terminal-line-item {
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed #21262d;
+      word-break: break-all;
+    }
+    .breed-text { color: #d2a8ff; font-weight: bold; }
+    .trans-text { color: #7ee787; font-weight: bold; }
     .status-line { color: #8b949e; font-style: italic; }
 
     .blinking-cursor {
@@ -120,7 +142,7 @@
       background-color: #7ee787; margin-left: 4px;
       vertical-align: middle; animation: blink 0.8s infinite;
     }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
     canvas { display: none; }
   </style>
@@ -129,8 +151,10 @@
 
   <div class="header-title">📡 LIVE CAM Animal Decoder</div>
 
+  <!-- 📹 실시간 카메라 & 캡처 이미지 동시 레이어 -->
   <div class="camera-container">
     <video id="webcam" autoplay playsinline muted></video>
+    <img id="frozen-img" alt="마지막 스캔 이미지">
     <div class="camera-overlay">
       <span class="rec-dot"></span> LIVE SCAN
     </div>
@@ -145,31 +169,32 @@
         <span class="dot dot-yellow"></span>
         <span class="dot dot-green"></span>
       </div>
-      <!-- 📌 상태 표시 소제목 영역 -->
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
-    <div class="terminal-body">
-      <div id="status-text" class="terminal-line status-line">> 버튼을 눌러 동물의 실시간 보디랭귀지 스캔을 시작하세요...</div>
-      <div id="animal-info-typed" class="terminal-line animal-line"></div>
-      <div id="translation-text-typed" class="terminal-line translation-line"></div>
-      <span class="blinking-cursor"></span>
+    <div class="terminal-body" id="terminal-body">
+      <div id="status-line" class="status-line">> 동물을 카메라에 비춰주세요...</div>
+      <!-- 📌 번역 결과가 최신순으로 상단에 계속 추가되는 리스트 -->
+      <div id="history-container"></div>
     </div>
   </div>
 
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    // =========================================================================
-    // 📌 [고정] 구글 앱스크립트 백엔드 배포 URL
-    // =========================================================================
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
+    const frozenImg = document.getElementById('frozen-img');
     const canvas = document.getElementById('frame-canvas');
     const statusHeader = document.getElementById('terminal-status');
+    const historyContainer = document.getElementById('history-container');
+    const statusLine = document.getElementById('status-line');
+    const terminalBody = document.getElementById('terminal-body');
+
     let isLiveActive = false;
     let isProcessing = false;
     let autoScanInterval = null;
+    let lastDataUrl = ''; // 마지막 분석 이미지 보관
 
     async function startLiveCamera() {
       const btn = document.getElementById('btn-camera');
@@ -179,9 +204,14 @@
         return;
       }
 
+      // 🔄 재시작 시 이전 결과 전체 리셋
+      historyContainer.innerHTML = '';
+      statusLine.style.display = 'block';
+      statusLine.innerText = '> 동물을 카메라에 비춰주세요...';
+      frozenImg.style.display = 'none'; // 정지 이미지 숨김
+
       try {
         statusHeader.innerText = 'Ready..';
-        document.getElementById('status-text').innerText = '> [CAMERA_CONNECTING] 라이브 카메라 연결 중...';
 
         let stream;
         try {
@@ -199,21 +229,26 @@
         isLiveActive = true;
         btn.innerText = '⏹️ 실시간 스캔 중지';
         btn.classList.add('active');
-        document.getElementById('status-text').innerText = '> [LIVE_ONLINE] 동물을 비추면 표정과 행동을 정밀 분석합니다...';
 
         startAutoScanLoop();
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
-        document.getElementById('status-text').innerText = '> [ERROR] 카메라를 켤 수 없습니다. 브라우저 권한을 확인해 주세요.';
       }
     }
 
+    // 🛑 스캔 중지 시: 카메라는 끄되 마지막 이미지 화면 고정 및 터미널 내용 보존
     function stopCamera() {
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
       }
       if (autoScanInterval) clearInterval(autoScanInterval);
+
+      // 마지막 captured 이미지 화면에 고정
+      if (lastDataUrl) {
+        frozenImg.src = lastDataUrl;
+        frozenImg.style.display = 'block';
+      }
 
       isLiveActive = false;
       isProcessing = false;
@@ -221,10 +256,8 @@
       btn.innerText = '🎥 실시간 라이브 카메라 시작';
       btn.classList.remove('active');
       statusHeader.innerText = 'Ready..';
-      document.getElementById('status-text').innerText = '> 실시간 스캔이 중지되었습니다.';
     }
 
-    // ⚡ 2초 간격으로 라이브 스캔 가속화
     function startAutoScanLoop() {
       if (autoScanInterval) clearInterval(autoScanInterval);
       autoScanInterval = setInterval(() => {
@@ -236,17 +269,15 @@
 
     async function captureCurrentFrameAndSend() {
       isProcessing = true;
-      // 📌 소제목 상태 업데이트: AI Scanning...
       statusHeader.innerText = 'AI Scanning...';
-      document.getElementById('status-text').innerText = '> [AI SCANNING...] 표정 및 몸짓 보디랭귀지 분석 중...';
 
-      // ⚡ 이미지 경량화 (280x210 / JPEG Quality 0.45)
       canvas.width = 280;
       canvas.height = 210;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const base64Image = canvas.toDataURL('image/jpeg', 0.45).split(',')[1];
+      lastDataUrl = canvas.toDataURL('image/jpeg', 0.45);
+      const base64Image = lastDataUrl.split(',')[1];
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -260,42 +291,57 @@
         if (!isLiveActive) return;
 
         if (data.error) {
-          if (data.error.message === "NO_ANIMAL") {
-            statusHeader.innerText = 'Ready..';
-            document.getElementById('status-text').innerText = '> [SEARCHING...] 화면에 동물이 탐지되지 않았습니다.';
-          } else {
-            statusHeader.innerText = 'Ready..';
-            document.getElementById('status-text').innerText = '> [ERROR] ' + data.error.message;
-          }
+          statusHeader.innerText = 'Ready..';
         } else {
-          // 📌 소제목 상태 업데이트: Translated.
           statusHeader.innerText = 'Translated.';
-          document.getElementById('status-text').innerText = '> [TARGET_LOCKED] 분석 완료!';
+          statusLine.style.display = 'none';
+
           const resultJson = JSON.parse(data.candidates[0].content.parts[0].text);
 
-          // ⚡ 통합된 과/종 정보와 큰따옴표 번역 대사 출력 (타이핑 속도 15ms로 가속)
-          await typeText('animal-info-typed', `> INFO : ${resultJson.animal_info}`);
-          await typeText('translation-text-typed', `> "${resultJson.translation}"`);
+          // 📌 최신 분석 결과를 가장 위쪽에 새 요소로 삽입 (Prepend)
+          addNewTranslationItem(resultJson.breed, resultJson.translation);
         }
       } catch (err) {
-        console.error(err);
         statusHeader.innerText = 'Ready..';
-        document.getElementById('status-text').innerText = '> [ERROR] 서버 통신 실패';
       } finally {
         isProcessing = false;
       }
     }
 
-    // ⚡ 타자기 애니메이션 속도 가속화 (35ms -> 15ms)
-    function typeText(elementId, text, speed = 15) {
+    // 📌 최신 번역 항목을 가장 상단(Prepend)에 타자기 효과로 추가하는 함수
+    async function addNewTranslationItem(breed, translation) {
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'terminal-line-item';
+
+      const breedSpan = document.createElement('span');
+      breedSpan.className = 'breed-text';
+      
+      const transSpan = document.createElement('span');
+      transSpan.className = 'trans-text';
+
+      itemDiv.appendChild(breedSpan);
+      itemDiv.appendChild(document.createTextNode(' : '));
+      itemDiv.appendChild(transSpan);
+
+      // 리스트의 맨 앞에 추가 (최신순 상단 배치)
+      historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
+
+      // 최신 항목이 들어올 때 상단 스크롤 위치 유지
+      terminalBody.scrollTop = 0;
+
+      // 타자기 타입 출력
+      await typeText(breedSpan, `> [${breed}]`);
+      await typeText(transSpan, `"${translation}"`);
+    }
+
+    function typeText(element, text, speed = 15) {
       return new Promise((resolve) => {
-        const el = document.getElementById(elementId);
-        el.innerHTML = '';
+        element.innerText = '';
         let index = 0;
 
         function type() {
           if (index < text.length) {
-            el.innerHTML += text.charAt(index);
+            element.innerText += text.charAt(index);
             index++;
             setTimeout(type, speed);
           } else {
