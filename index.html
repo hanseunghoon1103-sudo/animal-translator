@@ -247,7 +247,7 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    // 🔗 배포한 웹앱 URL
+    // 🔗 배포한 웹앱 URL을 입력하세요
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
@@ -367,11 +367,12 @@
         logStatus('> 동영상을 불러왔습니다. 동영상 플레이 버튼(▶)을 누를 때마다 분석이 실행됩니다.');
 
         video.onplay = function() {
+          // 재생 버튼 클릭 시 0.8초 후 캡처 시도
           setTimeout(() => {
             if (activeMode === 'video' && !isAnalyzing) {
               captureAndAnalyze(false);
             }
-          }, 600);
+          }, 800);
         };
       }
     }
@@ -404,6 +405,22 @@
       captureAndAnalyze(true);
     }
 
+    // 🔍 캡처 화면이 검은색(빈 프레임)인지 점검하는 기능
+    function checkIsBlackCanvas(ctx, width, height) {
+      try {
+        const pixelData = ctx.getImageData(0, 0, width, height).data;
+        let brightnessSum = 0;
+        const sampleStep = 40; // 빠른 검사를 위해 픽셀 건너뛰기
+        for (let i = 0; i < pixelData.length; i += sampleStep) {
+          brightnessSum += (pixelData[i] + pixelData[i + 1] + pixelData[i + 2]) / 3;
+        }
+        const avgBrightness = brightnessSum / (pixelData.length / sampleStep);
+        return avgBrightness < 10; // 평균 밝기가 10 미만이면 검은 화면으로 간주
+      } catch (e) {
+        return false;
+      }
+    }
+
     async function captureAndAnalyze(hasAudioTrigger) {
       if (isAnalyzing) return;
       isAnalyzing = true;
@@ -433,6 +450,14 @@
       const ctx = canvas.getContext('2d');
 
       ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+      // 📌 검은 화면 캡처 방지 안전장치
+      if (checkIsBlackCanvas(ctx, targetWidth, targetHeight)) {
+        logStatus('> 검은 프레임이 감지되어 0.5초 뒤 다시 캡처를 시도합니다...');
+        await new Promise(r => setTimeout(r, 500));
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+      }
+
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       const base64Image = dataUrl.split(',')[1];
 
