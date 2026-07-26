@@ -250,7 +250,7 @@
     let activeMode = 'none';
 
     const SOUND_THRESHOLD = 20;
-    const ANALYSIS_DURATION = 3000;
+    const RECORD_CLIP_MS = 2500; // 📌 동영상 클립 녹화 시간: 2.5초
 
     function initAudioContext() {
       if (!audioContext) {
@@ -275,7 +275,7 @@
       stopCamera();
 
       try {
-        logStatus('Listening.. 동물이 소리를 내면 감지합니다.');
+        logStatus('Listening.. 소리가 감지되면 2.5초 영상 클립을 분석합니다.');
 
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
@@ -351,7 +351,7 @@
         video.muted = false;
         video.src = fileUrl;
         overlayText.innerText = 'VIDEO FILE';
-        logStatus('동영상 로드 완료. 재생(▶) 시 자동 번역됩니다.');
+        logStatus('동영상 로드 완료. 재생(▶) 시 소리가 나면 자동 클립 분석합니다.');
 
         video.onplay = function() {
           initAudioContext();
@@ -388,110 +388,86 @@
       soundMeterFill.style.width = fillPercent + '%';
 
       if (average > SOUND_THRESHOLD && !isAnalyzing) {
-        logStatus(activeMode === 'video' ? '동영상 소리 감지! 분석 중...' : '실시간 소리 감지! 3초간 분석 중...');
-        captureAndAnalyze(activeMode === 'camera');
+        logStatus('🎬 [소리 포착] 2.5초 동영상 클립을 녹화 분석합니다!');
+        captureAndAnalyzeVideoClip();
       } else {
         requestAnimationFrame(monitorVolume);
       }
     }
 
-    function checkIsBlackCanvas(ctx, width, height) {
-      try {
-        const pixelData = ctx.getImageData(0, 0, width, height).data;
-        let brightnessSum = 0;
-        const sampleStep = 40;
-        for (let i = 0; i < pixelData.length; i += sampleStep) {
-          brightnessSum += (pixelData[i] + pixelData[i + 1] + pixelData[i + 2]) / 3;
-        }
-        const avgBrightness = brightnessSum / (pixelData.length / sampleStep);
-        return avgBrightness < 10;
-      } catch (e) {
-        return false;
-      }
-    }
-
-    async function captureAndAnalyze(hasAudioTrigger) {
+    // 🎥 2.5초 분량의 실제 동영상 클립(WebM) 녹화 및 생성 함수
+    async function captureAndAnalyzeVideoClip() {
       if (isAnalyzing) return;
       isAnalyzing = true;
 
-      overlayText.innerText = 'ANALYZING...';
+      overlayText.innerText = 'RECORDING...';
 
+      // 1. 대표 썸네일 이미지 생성
       let srcWidth = video.videoWidth || 640;
       let srcHeight = video.videoHeight || 480;
-
-      const maxDimension = 800;
-      let targetWidth = srcWidth;
-      let targetHeight = srcHeight;
-
-      if (srcWidth > maxDimension || srcHeight > maxDimension) {
-        if (srcWidth > srcHeight) {
-          targetWidth = maxDimension;
-          targetHeight = Math.round((srcHeight * maxDimension) / srcWidth);
-        } else {
-          targetHeight = maxDimension;
-          targetWidth = Math.round((srcWidth * maxDimension) / srcHeight);
-        }
-      }
-
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
+      canvas.width = Math.min(640, srcWidth);
+      canvas.height = Math.round((srcHeight * canvas.width) / srcWidth);
       const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
-      ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-
-      if (checkIsBlackCanvas(ctx, targetWidth, targetHeight)) {
-        await new Promise(r => setTimeout(r, 400));
-        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-      }
-
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      const base64Image = dataUrl.split(',')[1];
-
-      let base64Audio = null;
-      let audioMimeType = 'audio/webm';
-
-      if (hasAudioTrigger && activeMode === 'camera') {
-        try {
-          const audioTrack = mediaStream.getAudioTracks()[0];
-          if (audioTrack && audioTrack.readyState === 'live') {
-            const audioOnlyStream = new MediaStream([audioTrack]);
-            const recorder = new MediaRecorder(audioOnlyStream, { mimeType: audioMimeType });
-            const chunks = [];
-
-            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
-            const recordPromise = new Promise(resolve => {
-              recorder.onstop = () => {
-                const blob = new Blob(chunks, { type: audioMimeType });
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  base64Audio = reader.result.split(',')[1];
-                  resolve();
-                };
-                reader.readAsDataURL(blob);
-              };
-            });
-
-            recorder.start();
-            await new Promise(r => setTimeout(r, ANALYSIS_DURATION));
-            recorder.stop();
-            await recordPromise;
-          }
-        } catch (e) {
-          console.warn("오디오 녹음 예외:", e);
+      // 2. 동영상 스트림 추출
+      let recordStream = null;
+      if (activeMode === 'camera') {
+        recordStream = mediaStream;
+      } else {
+        if (typeof video.captureStream === 'function') {
+          recordStream = video.captureStream();
+        } else if (typeof video.mozCaptureStream === 'function') {
+          recordStream = video.mozCaptureStream();
         }
       }
 
-      logStatus('AI 분석 중... Gemini 전송 완료');
+      let videoBase64 = null;
+      let mimeType = 'video/webm';
+
+      if (recordStream && typeof MediaRecorder !== 'undefined') {
+        try {
+          const recorder = new MediaRecorder(recordStream, { mimeType: 'video/webm' });
+          const chunks = [];
+
+          recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+          const recordPromise = new Promise(resolve => {
+            recorder.onstop = () => {
+              const blob = new Blob(chunks, { type: 'video/webm' });
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                videoBase64 = reader.result.split(',')[1];
+                resolve();
+              };
+              reader.readAsDataURL(blob);
+            };
+          });
+
+          recorder.start();
+          await new Promise(r => setTimeout(r, RECORD_CLIP_MS)); // 2.5초간 클립 수집
+          recorder.stop();
+          await recordPromise;
+        } catch (e) {
+          console.warn("클립 녹화 실패, 단일 이미지 캡처로 대체합니다:", e);
+        }
+      }
+
+      overlayText.innerText = 'ANALYZING...';
+      logStatus('AI 분석 중... Gemini 2.5 Flash 전송 중');
+
+      // 클립 생성이 안 된 경우 썸네일 Base64 전송
+      const fallbackImageBase64 = thumbDataUrl.split(',')[1];
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({
-            imageBase64: base64Image,
-            audioBase64: base64Audio,
-            audioMimeType: audioMimeType
+            videoBase64: videoBase64,
+            imageBase64: fallbackImageBase64,
+            mimeType: mimeType
           })
         });
 
@@ -499,7 +475,7 @@
 
         if (data.success) {
           logStatus('Translated! 번역 완료');
-          await addNewTranslationItem(data.breed, data.translation, dataUrl);
+          await addNewTranslationItem(data.breed, data.translation, thumbDataUrl);
         } else {
           if (data.error) {
             logStatus('서버 에러: ' + data.error);
