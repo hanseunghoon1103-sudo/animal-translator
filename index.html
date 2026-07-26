@@ -37,7 +37,7 @@
       box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
     }
     #webcam { width: 100%; height: 100%; object-fit: cover; }
-    #frozen-img {
+    #preview-img {
       display: none;
       width: 100%;
       height: 100%;
@@ -100,8 +100,8 @@
     .btn {
       flex: 1;
       border: none;
-      padding: 14px 16px;
-      font-size: 0.95rem;
+      padding: 12px 14px;
+      font-size: 0.9rem;
       font-weight: bold;
       border-radius: 10px;
       cursor: pointer;
@@ -110,7 +110,17 @@
     }
     .btn-start-camera { background-color: #238636; color: white; }
     .btn-start-camera.active { background-color: #da3633; }
-    .btn-manual-scan { background-color: #1f6feb; color: white; }
+    .btn-upload { background-color: #8957e5; color: white; }
+    
+    .btn-manual-scan {
+      width: 100%;
+      max-width: 500px;
+      margin-top: 8px;
+      background-color: #1f6feb;
+      color: white;
+      padding: 14px;
+      font-size: 0.95rem;
+    }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     #translator-terminal {
@@ -169,11 +179,11 @@
   <div class="header-title">📡 LIVE CAM Animal Decoder</div>
 
   <div class="camera-container">
-    <video id="webcam" autoplay playsinline muted></video>
-    <img id="frozen-img" alt="마지막 스캔 이미지">
+    <video id="webcam" playsinline controls style="display:none;"></video>
+    <img id="preview-img" alt="미리보기 이미지">
     <div class="camera-overlay">
       <div class="rec-status">
-        <span class="rec-dot"></span> <span id="overlay-text">LIVE STREAM</span>
+        <span class="rec-dot"></span> <span id="overlay-text">READY</span>
       </div>
       <div class="sound-meter">
         <div id="sound-meter-fill" class="sound-meter-fill"></div>
@@ -182,9 +192,12 @@
   </div>
 
   <div class="btn-group">
-    <button id="btn-camera" class="btn btn-start-camera" onclick="toggleCamera()">🎥 라이브 카메라 시작</button>
-    <button id="btn-manual" class="btn btn-manual-scan" onclick="manualTriggerScan()" disabled>📸 바로 번역</button>
+    <button id="btn-camera" class="btn btn-start-camera" onclick="toggleCamera()">🎥 실시간 카메라</button>
+    <button id="btn-upload" class="btn btn-upload" onclick="triggerFileUpload()">📁 동영상/사진 업로드</button>
+    <input type="file" id="file-input" accept="video/*,image/*" onchange="handleFileSelect(event)" style="display:none;">
   </div>
+
+  <button id="btn-manual" class="btn btn-manual-scan" onclick="manualTriggerScan()">📸 현재 장면 번역하기</button>
 
   <div id="translator-terminal">
     <div class="terminal-header">
@@ -196,7 +209,7 @@
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 동물을 화면에 맞추고 소리를 듣고 있습니다...</div>
+      <div id="status-line" class="status-line">> 라이브 카메라를 켜거나 동물 파일(동영상/사진)을 올려주세요.</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -208,15 +221,15 @@
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
-    const frozenImg = document.getElementById('frozen-img');
+    const previewImg = document.getElementById('preview-img');
     const canvas = document.getElementById('frame-canvas');
     const statusHeader = document.getElementById('terminal-status');
     const historyContainer = document.getElementById('history-container');
     const statusLine = document.getElementById('status-line');
     const terminalBody = document.getElementById('terminal-body');
     const soundMeterFill = document.getElementById('sound-meter-fill');
-    const btnManual = document.getElementById('btn-manual');
     const overlayText = document.getElementById('overlay-text');
+    const fileInput = document.getElementById('file-input');
 
     let isLiveActive = false;
     let isAnalyzing = false;
@@ -224,9 +237,9 @@
     let audioContext = null;
     let analyser = null;
     let microphone = null;
-    let lastDataUrl = '';
+    let activeMode = 'none'; // 'camera', 'video', 'image'
 
-    const SOUND_THRESHOLD = 25; // 소리 감지 민감도 (25~30 권장)
+    const SOUND_THRESHOLD = 25;
 
     async function toggleCamera() {
       if (isLiveActive) {
@@ -237,10 +250,7 @@
     }
 
     async function startCamera() {
-      historyContainer.innerHTML = '';
-      statusLine.style.display = 'block';
-      statusLine.innerText = '> 동물을 화면에 맞추고 소리를 듣고 있습니다...';
-      frozenImg.style.display = 'none';
+      stopCamera(); // 기존 동작 정지
 
       try {
         statusHeader.innerText = 'Listening..';
@@ -250,6 +260,8 @@
           audio: true
         });
 
+        video.style.display = 'block';
+        video.controls = false;
         video.srcObject = mediaStream;
         await video.play();
 
@@ -260,15 +272,17 @@
         microphone.connect(analyser);
 
         isLiveActive = true;
+        activeMode = 'camera';
+        overlayText.innerText = 'LIVE STREAM';
+
         const btnCamera = document.getElementById('btn-camera');
-        btnCamera.innerText = '⏹️ 스캔 중지';
+        btnCamera.innerText = '⏹️ 카메라 중지';
         btnCamera.classList.add('active');
-        btnManual.disabled = false;
 
         monitorVolume();
 
       } catch (err) {
-        console.error("카메라/마이크 연결 에러:", err);
+        console.error("카메라 연결 에러:", err);
         statusLine.innerText = '> [에러] 카메라 및 마이크 권한을 허용해 주세요.';
       }
     }
@@ -284,23 +298,54 @@
         audioContext.close();
       }
 
-      if (lastDataUrl) {
-        frozenImg.src = lastDataUrl;
-        frozenImg.style.display = 'block';
-      }
+      video.pause();
+      video.srcObject = null;
+      video.removeAttribute('src');
 
       const btnCamera = document.getElementById('btn-camera');
-      btnCamera.innerText = '🎥 라이브 카메라 시작';
+      btnCamera.innerText = '🎥 실시간 카메라';
       btnCamera.classList.remove('active');
-      btnManual.disabled = true;
 
-      statusHeader.innerText = 'Ready..';
       soundMeterFill.style.width = '0%';
       overlayText.innerText = 'OFFLINE';
+      statusHeader.innerText = 'Ready..';
+    }
+
+    // 파일 업로드 트리가
+    function triggerFileUpload() {
+      fileInput.click();
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      stopCamera(); // 실시간 카메라 종료
+
+      const fileUrl = URL.createObjectURL(file);
+
+      if (file.type.startsWith('video/')) {
+        activeMode = 'video';
+        previewImg.style.display = 'none';
+        video.style.display = 'block';
+        video.controls = true; // 동영상 재생/일시정지 조작 가능
+        video.src = fileUrl;
+        video.play();
+        overlayText.innerText = 'VIDEO FILE';
+        statusLine.innerText = '> 동영상을 재생하면서 원하시는 장면에서 [📸 현재 장면 번역하기]를 눌러보세요!';
+
+      } else if (file.type.startsWith('image/')) {
+        activeMode = 'image';
+        video.style.display = 'none';
+        previewImg.style.display = 'block';
+        previewImg.src = fileUrl;
+        overlayText.innerText = 'IMAGE FILE';
+        statusLine.innerText = '> 이미지 파일이로드 되었습니다. [📸 현재 장면 번역하기]를 누르세요.';
+      }
     }
 
     function monitorVolume() {
-      if (!isLiveActive) return;
+      if (!isLiveActive || activeMode !== 'camera') return;
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -323,38 +368,39 @@
     }
 
     function manualTriggerScan() {
-      if (!isLiveActive || isAnalyzing) return;
+      if (isAnalyzing) return;
       captureAndAnalyze(false);
     }
 
     async function captureAndAnalyze(hasAudioTrigger) {
-      if (isAnalyzing || !isLiveActive) return;
+      if (isAnalyzing) return;
       isAnalyzing = true;
 
-      overlayText.innerText = hasAudioTrigger ? 'RECORDING VOICE...' : 'CAPTURING...';
-      statusHeader.innerText = hasAudioTrigger ? 'Listening Voice...' : 'Capturing...';
+      statusHeader.innerText = 'Capturing...';
+      overlayText.innerText = 'ANALYZING...';
 
-      // 1. 영상 캡처
       canvas.width = 640;
       canvas.height = 480;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      lastDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const base64Image = lastDataUrl.split(',')[1];
 
-      // 2. 오디오 녹음 (2.2초로 안정성 확보)
+      // 현재 활성화된 모드에 맞춰 이미지 추출
+      if (activeMode === 'image') {
+        ctx.drawImage(previewImg, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
+      const base64Image = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+      // 라이브 카메라 모드이면서 소리가 감지되었을 때만 음성 녹음
       let base64Audio = null;
       let audioMimeType = 'audio/webm';
 
-      if (hasAudioTrigger) {
+      if (hasAudioTrigger && activeMode === 'camera') {
         try {
           const audioTrack = mediaStream.getAudioTracks()[0];
           if (audioTrack && audioTrack.readyState === 'live') {
             const audioOnlyStream = new MediaStream([audioTrack]);
-
-            if (MediaRecorder.isTypeSupported('audio/webm')) audioMimeType = 'audio/webm';
-            else if (MediaRecorder.isTypeSupported('audio/mp4')) audioMimeType = 'audio/mp4';
-
             const recorder = new MediaRecorder(audioOnlyStream, { mimeType: audioMimeType });
             const chunks = [];
 
@@ -373,18 +419,16 @@
             });
 
             recorder.start();
-            await new Promise(r => setTimeout(r, 2200)); // 2.2초 녹음
+            await new Promise(r => setTimeout(r, 2000));
             recorder.stop();
             await recordPromise;
           }
         } catch (e) {
-          console.warn("오디오 수집 실패, 이미지 전용으로 분석 진행:", e);
+          console.warn("오디오 녹음 예외:", e);
         }
       }
 
-      // 3. 백엔드로 데이터 송신
       statusHeader.innerText = 'AI Analyzing...';
-      overlayText.innerText = 'ANALYZING...';
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -399,19 +443,17 @@
 
         const data = await response.json();
 
-        if (!isLiveActive) return;
-
         if (data.success) {
           statusHeader.innerText = 'Translated!';
           statusLine.style.display = 'none';
           await addNewTranslationItem(data.breed, data.translation);
         } else {
-          statusHeader.innerText = 'Searching..';
+          statusHeader.innerText = 'Ready..';
           statusLine.style.display = 'block';
           if (data.error) {
             statusLine.innerText = '> [오류 발생] ' + data.error;
           } else {
-            statusLine.innerText = '> 동물이 명확하게 인식되지 않았습니다. 다시 소리를 내어주세요.';
+            statusLine.innerText = '> 동물이 탐지되지 않았습니다. 동물이 잘 보이는 정면 장면에서 다시 시도해 주세요.';
           }
         }
 
@@ -419,16 +461,14 @@
         console.error("통신 에러:", err);
         statusHeader.innerText = 'Error..';
         statusLine.style.display = 'block';
-        statusLine.innerText = '> [서버 통신 예외 발생] 재시도합니다...';
+        statusLine.innerText = '> [통신 오류] 재시도합니다...';
       } finally {
         setTimeout(() => {
           isAnalyzing = false;
-          if (isLiveActive) {
-            statusHeader.innerText = 'Listening..';
-            overlayText.innerText = 'LIVE STREAM';
-            requestAnimationFrame(monitorVolume);
-          }
-        }, 1500);
+          statusHeader.innerText = isLiveActive ? 'Listening..' : 'Ready..';
+          overlayText.innerText = activeMode === 'camera' ? 'LIVE STREAM' : activeMode.toUpperCase();
+          if (isLiveActive) requestAnimationFrame(monitorVolume);
+        }, 1200);
       }
     }
 
