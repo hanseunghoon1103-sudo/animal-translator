@@ -184,7 +184,6 @@
     }
     .breed-text { color: #d2a8ff; font-weight: bold; }
     .trans-text { color: #7ee787; font-weight: bold; }
-    /* 📌 동물이 탐지되지 않았을 때 전용 회색 스타일 */
     .no-animal-text { color: #8b949e; font-style: italic; }
 
     canvas { display: none; }
@@ -532,7 +531,6 @@
       statusHeader.innerText = msg;
     }
 
-    // 📌 번역 항목 출력 함수 (동물 미탐지 시 회색 처리 및 품종 표시 안 함)
     async function addNewTranslationItem(breed, translation, thumbDataUrl) {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'terminal-line-item';
@@ -544,11 +542,9 @@
       const textContainer = document.createElement('div');
       textContainer.className = 'item-text-container';
 
-      // 동물이 탐지되지 않은 경우인지 판별
       const isNoAnimal = (breed === '알수없음' || translation.includes('탐지되지 않았습니다'));
 
       if (isNoAnimal) {
-        // 📌 동물이 없을 경우: 품종 표기 생략 후 회색 텍스트로만 출력
         const noAnimalSpan = document.createElement('span');
         noAnimalSpan.className = 'no-animal-text';
 
@@ -561,7 +557,6 @@
 
         await typeText(noAnimalSpan, `> 화면에 동물이 탐지되지 않았습니다.`);
       } else {
-        // 📌 동물이 정상 탐지된 경우: 보라색 품종 + 연두색 대사 출력
         const breedSpan = document.createElement('span');
         breedSpan.className = 'breed-text';
         
