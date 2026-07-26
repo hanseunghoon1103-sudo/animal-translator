@@ -184,6 +184,8 @@
     }
     .breed-text { color: #d2a8ff; font-weight: bold; }
     .trans-text { color: #7ee787; font-weight: bold; }
+    /* 📌 동물이 탐지되지 않았을 때 전용 회색 스타일 */
+    .no-animal-text { color: #8b949e; font-style: italic; }
 
     canvas { display: none; }
   </style>
@@ -511,7 +513,6 @@
         console.error("통신 에러:", err);
         logStatus('[통신 에러] 응답 실패');
       } finally {
-        // 3.5초 쿨타임을 지켜 연속 중복 분석 방지
         setTimeout(() => {
           isAnalyzing = false;
           overlayText.innerText = activeMode === 'camera' ? 'LIVE STREAM' : 'VIDEO FILE';
@@ -531,6 +532,7 @@
       statusHeader.innerText = msg;
     }
 
+    // 📌 번역 항목 출력 함수 (동물 미탐지 시 회색 처리 및 품종 표시 안 함)
     async function addNewTranslationItem(breed, translation, thumbDataUrl) {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'terminal-line-item';
@@ -542,24 +544,43 @@
       const textContainer = document.createElement('div');
       textContainer.className = 'item-text-container';
 
-      const breedSpan = document.createElement('span');
-      breedSpan.className = 'breed-text';
-      
-      const transSpan = document.createElement('span');
-      transSpan.className = 'trans-text';
+      // 동물이 탐지되지 않은 경우인지 판별
+      const isNoAnimal = (breed === '알수없음' || translation.includes('탐지되지 않았습니다'));
 
-      textContainer.appendChild(breedSpan);
-      textContainer.appendChild(document.createTextNode(' : '));
-      textContainer.appendChild(transSpan);
+      if (isNoAnimal) {
+        // 📌 동물이 없을 경우: 품종 표기 생략 후 회색 텍스트로만 출력
+        const noAnimalSpan = document.createElement('span');
+        noAnimalSpan.className = 'no-animal-text';
 
-      itemDiv.appendChild(imgEl);
-      itemDiv.appendChild(textContainer);
+        textContainer.appendChild(noAnimalSpan);
+        itemDiv.appendChild(imgEl);
+        itemDiv.appendChild(textContainer);
 
-      historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
-      terminalBody.scrollTop = 0;
+        historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
+        terminalBody.scrollTop = 0;
 
-      await typeText(breedSpan, `> [${breed}]`);
-      await typeText(transSpan, ` "${translation}"`);
+        await typeText(noAnimalSpan, `> 화면에 동물이 탐지되지 않았습니다.`);
+      } else {
+        // 📌 동물이 정상 탐지된 경우: 보라색 품종 + 연두색 대사 출력
+        const breedSpan = document.createElement('span');
+        breedSpan.className = 'breed-text';
+        
+        const transSpan = document.createElement('span');
+        transSpan.className = 'trans-text';
+
+        textContainer.appendChild(breedSpan);
+        textContainer.appendChild(document.createTextNode(' : '));
+        textContainer.appendChild(transSpan);
+
+        itemDiv.appendChild(imgEl);
+        itemDiv.appendChild(textContainer);
+
+        historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
+        terminalBody.scrollTop = 0;
+
+        await typeText(breedSpan, `> [${breed}]`);
+        await typeText(transSpan, ` "${translation}"`);
+      }
     }
 
     function typeText(element, text, speed = 15) {
