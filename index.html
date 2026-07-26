@@ -40,7 +40,6 @@
       justify-content: center;
     }
     
-    /* 비디오 화면이 찌그러지거나 위아래가 잘리지 않게 비율 유지 설정 */
     #webcam {
       width: 100%;
       height: 100%;
@@ -124,13 +123,39 @@
     }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .debug-box {
+      width: 100%;
+      max-width: 500px;
+      margin-top: 12px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .debug-title {
+      font-size: 0.75rem;
+      color: #8b949e;
+      font-family: monospace;
+    }
+    #debug-img {
+      width: 60px;
+      height: 45px;
+      object-fit: contain;
+      border: 1px solid #38edf8;
+      border-radius: 4px;
+      background: #000;
+    }
+
     #translator-terminal {
       width: 100%;
       max-width: 500px;
       background-color: #0d1117;
       border: 1px solid #30363d;
       border-radius: 12px;
-      margin-top: 15px;
+      margin-top: 10px;
       overflow: hidden;
       box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
     }
@@ -194,11 +219,16 @@
   <div class="btn-group">
     <button id="btn-camera" class="btn btn-start-camera" onclick="toggleCamera()">🎥 라이브 카메라</button>
     <button id="btn-upload" class="btn btn-upload" onclick="triggerFileUpload()">🎬 동영상 업로드</button>
-    <!-- video 전용 파일 선택 설정 -->
     <input type="file" id="file-input" accept="video/*" onchange="handleFileSelect(event)" style="display:none;">
   </div>
 
-  <button id="btn-manual" class="btn btn-manual-scan" onclick="manualTriggerScan()">📸 수동 번역하기</button>
+  <!-- 라이브캠 전용 강제 분석 버튼 -->
+  <button id="btn-manual" class="btn btn-manual-scan" onclick="forceLiveCamScan()" disabled>⚡ 라이브캠 강제 3초 분석</button>
+
+  <div class="debug-box">
+    <div class="debug-title">📸 AI 전송 캡처 프레임:</div>
+    <img id="debug-img" alt="캡처 이미지">
+  </div>
 
   <div id="translator-terminal">
     <div class="terminal-header">
@@ -210,7 +240,7 @@
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 분석할 동영상 파일을 업로드하세요.</div>
+      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 분석할 동영상을 업로드하세요.</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -230,6 +260,8 @@
     const soundMeterFill = document.getElementById('sound-meter-fill');
     const overlayText = document.getElementById('overlay-text');
     const fileInput = document.getElementById('file-input');
+    const debugImg = document.getElementById('debug-img');
+    const btnManual = document.getElementById('btn-manual');
 
     let isLiveActive = false;
     let isAnalyzing = false;
@@ -240,6 +272,7 @@
     let activeMode = 'none';
 
     const SOUND_THRESHOLD = 20;
+    const ANALYSIS_DURATION = 3000; // 📌 AI 시청각 수집 시간: 3초
 
     async function toggleCamera() {
       if (isLiveActive) {
@@ -278,13 +311,14 @@
         const btnCamera = document.getElementById('btn-camera');
         btnCamera.innerText = '⏹️ 카메라 중지';
         btnCamera.classList.add('active');
+        btnManual.disabled = false;
 
-        logStatus('> 라이브 카메라 감지 중... 동물이 소리를 내면 자동 작동합니다.');
+        logStatus('> 라이브 카메라 대기 중... 소리가 나면 자동 스캔하며, [⚡ 라이브캠 강제 3초 분석] 버튼을 눌러 바로 번역할 수도 있습니다.');
         monitorVolume();
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
-        logStatus('> [에러] 카메라 및 마이크 권한이 거부되었습니다.');
+        logStatus('> [에러] 카메라 및 마이크 권한을 허용해 주세요.');
       }
     }
 
@@ -306,6 +340,7 @@
       const btnCamera = document.getElementById('btn-camera');
       btnCamera.innerText = '🎥 라이브 카메라';
       btnCamera.classList.remove('active');
+      btnManual.disabled = true;
 
       soundMeterFill.style.width = '0%';
       overlayText.innerText = 'OFFLINE';
@@ -316,6 +351,7 @@
       fileInput.click();
     }
 
+    // 🎬 동영상 업로드 시 자동 분석 로직
     function handleFileSelect(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -329,9 +365,20 @@
         video.style.display = 'block';
         video.controls = true;
         video.src = fileUrl;
-        video.play();
         overlayText.innerText = 'VIDEO FILE';
-        logStatus('> 동영상 로드 완료. 원하는 장면에서 [📸 수동 번역하기]를 클릭하세요.');
+        logStatus('> 동영상을 불러왔습니다. 자동으로 3초 시청각 프레임 분석을 시작합니다...');
+
+        video.play();
+
+        // 영상이 재생되기 시작하면 0.8초 후 즉시 자동 분석 실행
+        video.onplaying = function() {
+          setTimeout(() => {
+            if (activeMode === 'video' && !isAnalyzing) {
+              captureAndAnalyze(false);
+            }
+          }, 800);
+          video.onplaying = null; // 1회만 자동 실행
+        };
       }
     }
 
@@ -358,9 +405,10 @@
       }
     }
 
-    function manualTriggerScan() {
-      if (isAnalyzing) return;
-      captureAndAnalyze(false);
+    // 라이브캠 모드 전용 강제 분석 실행
+    function forceLiveCamScan() {
+      if (!isLiveActive || isAnalyzing) return;
+      captureAndAnalyze(true); // 강제 오디오/비디오 3초 스캔 수행
     }
 
     async function captureAndAnalyze(hasAudioTrigger) {
@@ -370,11 +418,9 @@
       statusHeader.innerText = 'Capturing...';
       overlayText.innerText = 'ANALYZING...';
 
-      // 동영상 원본 해상도 파악
       let srcWidth = video.videoWidth || 640;
       let srcHeight = video.videoHeight || 480;
 
-      // 비틀어짐 없이 최대 800px 크기로 Canvas 생성
       const maxDimension = 800;
       let targetWidth = srcWidth;
       let targetHeight = srcHeight;
@@ -393,16 +439,19 @@
       canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
 
-      // 현재 비디오의 화면 프레임을 Canvas에 원본 구도로 전달
       ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-      const base64Image = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const base64Image = dataUrl.split(',')[1];
+
+      debugImg.src = dataUrl;
 
       let base64Audio = null;
       let audioMimeType = 'audio/webm';
 
+      // 라이브 카메라일 때 3초간 오디오 녹음 수집
       if (hasAudioTrigger && activeMode === 'camera') {
         try {
-          logStatus('> [소리 감지] 2초간 음성을 수집합니다...');
+          logStatus('> [소리 감지] 3초간 실시간 시청각 데이터를 녹음/수집 중...');
           const audioTrack = mediaStream.getAudioTracks()[0];
           if (audioTrack && audioTrack.readyState === 'live') {
             const audioOnlyStream = new MediaStream([audioTrack]);
@@ -424,7 +473,7 @@
             });
 
             recorder.start();
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, ANALYSIS_DURATION)); // 3초 녹음
             recorder.stop();
             await recordPromise;
           }
@@ -434,7 +483,7 @@
       }
 
       statusHeader.innerText = 'AI Analyzing...';
-      logStatus('> [AI 서버 전송] 현재 영상 프레임을 분석 중입니다...');
+      logStatus('> [AI 분석 중] 3초간 추출된 영상 및 소리를 Gemini AI가 번역 중입니다...');
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -455,16 +504,16 @@
         } else {
           statusHeader.innerText = 'Ready..';
           if (data.error) {
-            logStatus('> [AI 서버 에러] ' + data.error);
+            logStatus('> [서버 메시지] ' + data.error);
           } else {
-            logStatus('> 대상을 구분하기 힘듭니다. 대상의 정면이 잘 보이는 장면에서 시도해 보세요.');
+            logStatus('> 대상을 인식하지 못했습니다. 다시 시도해 주세요.');
           }
         }
 
       } catch (err) {
         console.error("통신 에러:", err);
         statusHeader.innerText = 'Error..';
-        logStatus('> [통신 에러] 서버 응답이 실패했습니다.');
+        logStatus('> [통신 에러] 서버 응답을 가져오지 못했습니다.');
       } finally {
         setTimeout(() => {
           isAnalyzing = false;
