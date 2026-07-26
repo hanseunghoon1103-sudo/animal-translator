@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>LIVE CAM Animal & Human Decoder</title>
+  <title>LIVE CAM Animal Decoder</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -111,17 +111,6 @@
     .btn-start-camera { background-color: #238636; color: white; }
     .btn-start-camera.active { background-color: #da3633; }
     .btn-upload { background-color: #8957e5; color: white; }
-    
-    .btn-manual-scan {
-      width: 100%;
-      max-width: 500px;
-      margin-top: 8px;
-      background-color: #1f6feb;
-      color: white;
-      padding: 14px;
-      font-size: 0.95rem;
-    }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .debug-box {
       width: 100%;
@@ -202,10 +191,11 @@
 </head>
 <body>
 
-  <div class="header-title">📡 LIVE CAM Animal & Human Decoder</div>
+  <div class="header-title">📡 LIVE CAM Animal Decoder</div>
 
   <div class="camera-container">
-    <video id="webcam" playsinline controls style="display:none;"></video>
+    <!-- 🔊 하울링 방지를 위해 muted 속성 추가 -->
+    <video id="webcam" playsinline muted controls style="display:none;"></video>
     <div class="camera-overlay">
       <div class="rec-status">
         <span class="rec-dot"></span> <span id="overlay-text">READY</span>
@@ -222,8 +212,6 @@
     <input type="file" id="file-input" accept="video/*" onchange="handleFileSelect(event)" style="display:none;">
   </div>
 
-  <button id="btn-manual" class="btn btn-manual-scan" onclick="forceLiveCamScan()" disabled>⚡ 라이브캠 강제 3초 분석</button>
-
   <div class="debug-box">
     <div class="debug-title">📸 AI 전송 캡처 프레임:</div>
     <img id="debug-img" alt="캡처 이미지">
@@ -239,7 +227,7 @@
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 분석할 동영상을 업로드하세요.</div>
+      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 동물 동영상을 업로드하세요.</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -247,7 +235,7 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    // 🔗 배포한 웹앱 URL을 입력하세요
+    // 🔗 배포한 웹앱 URL
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
@@ -260,7 +248,6 @@
     const overlayText = document.getElementById('overlay-text');
     const fileInput = document.getElementById('file-input');
     const debugImg = document.getElementById('debug-img');
-    const btnManual = document.getElementById('btn-manual');
 
     let isLiveActive = false;
     let isAnalyzing = false;
@@ -294,6 +281,7 @@
 
         video.style.display = 'block';
         video.controls = false;
+        video.muted = true; // 🔊 하울링 방지 소리 소음 강제 차단
         video.srcObject = mediaStream;
         await video.play();
 
@@ -310,9 +298,8 @@
         const btnCamera = document.getElementById('btn-camera');
         btnCamera.innerText = '⏹️ 카메라 중지';
         btnCamera.classList.add('active');
-        btnManual.disabled = false;
 
-        logStatus('> 라이브 카메라 대기 중... 소리가 나면 자동으로 번역합니다.');
+        logStatus('> 동물 소리 감지 대기 중... 동물이 울면 자동으로 번역합니다.');
         monitorVolume();
 
       } catch (err) {
@@ -339,7 +326,6 @@
       const btnCamera = document.getElementById('btn-camera');
       btnCamera.innerText = '🎥 라이브 카메라';
       btnCamera.classList.remove('active');
-      btnManual.disabled = true;
 
       soundMeterFill.style.width = '0%';
       overlayText.innerText = 'OFFLINE';
@@ -362,9 +348,10 @@
         activeMode = 'video';
         video.style.display = 'block';
         video.controls = true;
+        video.muted = false; // 업로드 영상은 음성 청취 허용
         video.src = fileUrl;
         overlayText.innerText = 'VIDEO FILE';
-        logStatus('> 동영상을 불러왔습니다. 동영상 플레이 버튼(▶)을 누를 때마다 분석이 실행됩니다.');
+        logStatus('> 동영상을 불러왔습니다. 재생(▶) 버튼을 누를 때마다 분석이 실행됩니다.');
 
         video.onplay = function() {
           setTimeout(() => {
@@ -397,11 +384,6 @@
       } else {
         requestAnimationFrame(monitorVolume);
       }
-    }
-
-    function forceLiveCamScan() {
-      if (!isLiveActive || isAnalyzing) return;
-      captureAndAnalyze(true);
     }
 
     function checkIsBlackCanvas(ctx, width, height) {
@@ -450,7 +432,7 @@
       ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
 
       if (checkIsBlackCanvas(ctx, targetWidth, targetHeight)) {
-        logStatus('> 검은 프레임이 감지되어 0.5초 뒤 다시 캡처합니다...');
+        logStatus('> 검은 프레임 감지, 0.5초 후 재캡처합니다...');
         await new Promise(r => setTimeout(r, 500));
         ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
       }
@@ -465,7 +447,7 @@
 
       if (hasAudioTrigger && activeMode === 'camera') {
         try {
-          logStatus('> [소리 감지] 3초간 오디오 데이터를 수집 중...');
+          logStatus('> [소리 감지] 3초간 동물 울음소리를 수집 중...');
           const audioTrack = mediaStream.getAudioTracks()[0];
           if (audioTrack && audioTrack.readyState === 'live') {
             const audioOnlyStream = new MediaStream([audioTrack]);
@@ -497,7 +479,7 @@
       }
 
       statusHeader.innerText = 'AI Analyzing...';
-      logStatus('> [AI 분석 중] 추출한 영상 및 소리를 번역하고 있습니다...');
+      logStatus('> [AI 분석 중] 추출된 영상과 동물 소리를 번역하는 중입니다...');
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -520,7 +502,7 @@
           if (data.error) {
             logStatus('> [서버 메시지] ' + data.error);
           } else {
-            logStatus('> 대상을 인식하지 못했습니다.');
+            logStatus('> 동물이 탐지되지 않았습니다.');
           }
         }
 
