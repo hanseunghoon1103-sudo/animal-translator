@@ -35,17 +35,18 @@
       overflow: hidden;
       border: 2px solid #1f293d;
       box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    #webcam { width: 100%; height: 100%; object-fit: cover; }
-    #preview-img {
-      display: none;
+    
+    /* 비디오 화면이 찌그러지거나 위아래가 잘리지 않게 비율 유지 설정 */
+    #webcam {
       width: 100%;
       height: 100%;
-      object-fit: cover;
-      position: absolute;
-      top: 0; left: 0;
-      z-index: 5;
+      object-fit: contain;
     }
+
     .camera-overlay {
       position: absolute;
       top: 12px; left: 12px;
@@ -180,7 +181,6 @@
 
   <div class="camera-container">
     <video id="webcam" playsinline controls style="display:none;"></video>
-    <img id="preview-img" alt="미리보기 이미지">
     <div class="camera-overlay">
       <div class="rec-status">
         <span class="rec-dot"></span> <span id="overlay-text">READY</span>
@@ -193,8 +193,9 @@
 
   <div class="btn-group">
     <button id="btn-camera" class="btn btn-start-camera" onclick="toggleCamera()">🎥 라이브 카메라</button>
-    <button id="btn-upload" class="btn btn-upload" onclick="triggerFileUpload()">📁 동영상/사진 업로드</button>
-    <input type="file" id="file-input" accept="video/*,image/*" onchange="handleFileSelect(event)" style="display:none;">
+    <button id="btn-upload" class="btn btn-upload" onclick="triggerFileUpload()">🎬 동영상 업로드</button>
+    <!-- video 전용 파일 선택 설정 -->
+    <input type="file" id="file-input" accept="video/*" onchange="handleFileSelect(event)" style="display:none;">
   </div>
 
   <button id="btn-manual" class="btn btn-manual-scan" onclick="manualTriggerScan()">📸 수동 번역하기</button>
@@ -209,7 +210,7 @@
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 라이브 카메라를 시작하면 소리를 감지하여 자동 번역됩니다.</div>
+      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 분석할 동영상 파일을 업로드하세요.</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -217,11 +218,10 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
-    // 🔗 배포한 웹앱 URL을 입력해 주세요
+    // 🔗 배포한 웹앱 URL을 입력하세요
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
-    const previewImg = document.getElementById('preview-img');
     const canvas = document.getElementById('frame-canvas');
     const statusHeader = document.getElementById('terminal-status');
     const historyContainer = document.getElementById('history-container');
@@ -239,7 +239,7 @@
     let microphone = null;
     let activeMode = 'none';
 
-    const SOUND_THRESHOLD = 20; // 민감도 설정 (낮을수록 민감함)
+    const SOUND_THRESHOLD = 20;
 
     async function toggleCamera() {
       if (isLiveActive) {
@@ -279,12 +279,12 @@
         btnCamera.innerText = '⏹️ 카메라 중지';
         btnCamera.classList.add('active');
 
-        logStatus('> 라이브 카메라 및 마이크 작동 중... 소리를 감지 대기 중입니다.');
+        logStatus('> 라이브 카메라 감지 중... 동물이 소리를 내면 자동 작동합니다.');
         monitorVolume();
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
-        logStatus('> [에러] 카메라 및 마이크 접근 권한이 거부되었습니다.');
+        logStatus('> [에러] 카메라 및 마이크 권한이 거부되었습니다.');
       }
     }
 
@@ -326,21 +326,12 @@
 
       if (file.type.startsWith('video/')) {
         activeMode = 'video';
-        previewImg.style.display = 'none';
         video.style.display = 'block';
         video.controls = true;
         video.src = fileUrl;
         video.play();
         overlayText.innerText = 'VIDEO FILE';
-        logStatus('> 동영상 로드 완료. [📸 수동 번역하기]를 클릭하세요.');
-
-      } else if (file.type.startsWith('image/')) {
-        activeMode = 'image';
-        video.style.display = 'none';
-        previewImg.style.display = 'block';
-        previewImg.src = fileUrl;
-        overlayText.innerText = 'IMAGE FILE';
-        logStatus('> 이미지 로드 완료. [📸 수동 번역하기]를 클릭하세요.');
+        logStatus('> 동영상 로드 완료. 원하는 장면에서 [📸 수동 번역하기]를 클릭하세요.');
       }
     }
 
@@ -379,16 +370,31 @@
       statusHeader.innerText = 'Capturing...';
       overlayText.innerText = 'ANALYZING...';
 
-      canvas.width = 640;
-      canvas.height = 480;
-      const ctx = canvas.getContext('2d');
+      // 동영상 원본 해상도 파악
+      let srcWidth = video.videoWidth || 640;
+      let srcHeight = video.videoHeight || 480;
 
-      if (activeMode === 'image') {
-        ctx.drawImage(previewImg, 0, 0, canvas.width, canvas.height);
-      } else {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // 비틀어짐 없이 최대 800px 크기로 Canvas 생성
+      const maxDimension = 800;
+      let targetWidth = srcWidth;
+      let targetHeight = srcHeight;
+
+      if (srcWidth > maxDimension || srcHeight > maxDimension) {
+        if (srcWidth > srcHeight) {
+          targetWidth = maxDimension;
+          targetHeight = Math.round((srcHeight * maxDimension) / srcWidth);
+        } else {
+          targetHeight = maxDimension;
+          targetWidth = Math.round((srcWidth * maxDimension) / srcHeight);
+        }
       }
 
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+
+      // 현재 비디오의 화면 프레임을 Canvas에 원본 구도로 전달
+      ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
       const base64Image = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 
       let base64Audio = null;
@@ -396,7 +402,7 @@
 
       if (hasAudioTrigger && activeMode === 'camera') {
         try {
-          logStatus('> [소리 감지!] 2초간 음성을 수집합니다...');
+          logStatus('> [소리 감지] 2초간 음성을 수집합니다...');
           const audioTrack = mediaStream.getAudioTracks()[0];
           if (audioTrack && audioTrack.readyState === 'live') {
             const audioOnlyStream = new MediaStream([audioTrack]);
@@ -428,7 +434,7 @@
       }
 
       statusHeader.innerText = 'AI Analyzing...';
-      logStatus('> [AI 서버 전송 중...] 시청각 데이터를 분석하고 있습니다.');
+      logStatus('> [AI 서버 전송] 현재 영상 프레임을 분석 중입니다...');
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -451,19 +457,19 @@
           if (data.error) {
             logStatus('> [AI 서버 에러] ' + data.error);
           } else {
-            logStatus('> 대상을 명확히 구분할 수 없습니다. 화면에 카메라를 더 가까이 맞춰보세요.');
+            logStatus('> 대상을 구분하기 힘듭니다. 대상의 정면이 잘 보이는 장면에서 시도해 보세요.');
           }
         }
 
       } catch (err) {
         console.error("통신 에러:", err);
         statusHeader.innerText = 'Error..';
-        logStatus('> [통신 에러] 구글 앱스 스크립트 웹앱 응답이 실패했습니다.');
+        logStatus('> [통신 에러] 서버 응답이 실패했습니다.');
       } finally {
         setTimeout(() => {
           isAnalyzing = false;
           statusHeader.innerText = isLiveActive ? 'Listening..' : 'Ready..';
-          overlayText.innerText = activeMode === 'camera' ? 'LIVE STREAM' : activeMode.toUpperCase();
+          overlayText.innerText = activeMode === 'camera' ? 'LIVE STREAM' : 'VIDEO FILE';
           if (isLiveActive) requestAnimationFrame(monitorVolume);
         }, 1500);
       }
