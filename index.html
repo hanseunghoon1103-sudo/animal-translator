@@ -250,7 +250,7 @@
     let activeMode = 'none';
 
     const SOUND_THRESHOLD = 20;
-    const RECORD_CLIP_MS = 2500; // 📌 동영상 클립 녹화 시간: 2.5초
+    const RECORD_CLIP_MS = 2500;
 
     function initAudioContext() {
       if (!audioContext) {
@@ -395,14 +395,12 @@
       }
     }
 
-    // 🎥 2.5초 분량의 실제 동영상 클립(WebM) 녹화 및 생성 함수
     async function captureAndAnalyzeVideoClip() {
       if (isAnalyzing) return;
       isAnalyzing = true;
 
       overlayText.innerText = 'RECORDING...';
 
-      // 1. 대표 썸네일 이미지 생성
       let srcWidth = video.videoWidth || 640;
       let srcHeight = video.videoHeight || 480;
       canvas.width = Math.min(640, srcWidth);
@@ -411,7 +409,6 @@
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
-      // 2. 동영상 스트림 추출
       let recordStream = null;
       if (activeMode === 'camera') {
         recordStream = mediaStream;
@@ -446,7 +443,7 @@
           });
 
           recorder.start();
-          await new Promise(r => setTimeout(r, RECORD_CLIP_MS)); // 2.5초간 클립 수집
+          await new Promise(r => setTimeout(r, RECORD_CLIP_MS));
           recorder.stop();
           await recordPromise;
         } catch (e) {
@@ -457,7 +454,6 @@
       overlayText.innerText = 'ANALYZING...';
       logStatus('AI 분석 중... Gemini 2.5 Flash 전송 중');
 
-      // 클립 생성이 안 된 경우 썸네일 Base64 전송
       const fallbackImageBase64 = thumbDataUrl.split(',')[1];
 
       try {
