@@ -112,39 +112,14 @@
     .btn-start-camera.active { background-color: #da3633; }
     .btn-upload { background-color: #8957e5; color: white; }
 
-    .debug-box {
-      width: 100%;
-      max-width: 500px;
-      margin-top: 12px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .debug-title {
-      font-size: 0.75rem;
-      color: #8b949e;
-      font-family: monospace;
-    }
-    #debug-img {
-      width: 60px;
-      height: 45px;
-      object-fit: contain;
-      border: 1px solid #38edf8;
-      border-radius: 4px;
-      background: #000;
-    }
-
+    /* 📌 터미널 컴포넌트 디자인 */
     #translator-terminal {
       width: 100%;
       max-width: 500px;
       background-color: #0d1117;
       border: 1px solid #30363d;
       border-radius: 12px;
-      margin-top: 10px;
+      margin-top: 15px;
       overflow: hidden;
       box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
     }
@@ -156,35 +131,62 @@
       border-bottom: 1px solid #30363d;
       position: relative;
     }
-    .terminal-buttons { display: flex; gap: 6px; }
+    .terminal-buttons { display: flex; gap: 6px; flex-shrink: 0; }
     .dot { width: 10px; height: 10px; border-radius: 50%; }
     .dot-red { background-color: #ff5f56; }
     .dot-yellow { background-color: #ffbd2e; }
     .dot-green { background-color: #27c93f; }
+    
+    /* 📌 상단 실시간 상태 코멘트 표시 영역 (줄바꿈 없이 한 줄로 노출) */
     .terminal-title {
-      position: absolute; left: 50%; transform: translateX(-50%);
-      font-family: monospace; font-size: 0.8rem; color: #38edf8; font-weight: bold;
+      position: absolute; left: 55px; right: 12px;
+      text-align: center;
+      font-family: monospace; 
+      font-size: 0.75rem; 
+      color: #38edf8; 
+      font-weight: bold;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     
     .terminal-body {
-      padding: 16px;
+      padding: 12px 14px;
       font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 0.9rem;
-      line-height: 1.6;
-      height: 220px;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      height: 250px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
     }
+
+    /* 📌 번역 결과 항목 카드 레이아웃 (왼쪽 캡처 썸네일 + 오른쪽 결과) */
     .terminal-line-item {
-      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
       padding-bottom: 8px;
       border-bottom: 1px dashed #21262d;
-      word-break: break-all;
+    }
+    .item-thumb {
+      width: 48px;
+      height: 36px;
+      object-fit: contain;
+      border-radius: 4px;
+      border: 1px solid #38edf8;
+      background-color: #000;
+      flex-shrink: 0;
+    }
+    .item-text-container {
+      flex: 1;
+      min-width: 0;
+      word-break: keep-all; /* 한국어 자연스러운 띄어쓰기 유지 */
+      overflow-wrap: break-word;
     }
     .breed-text { color: #d2a8ff; font-weight: bold; }
     .trans-text { color: #7ee787; font-weight: bold; }
-    .status-line { color: #8b949e; font-style: italic; }
 
     canvas { display: none; }
   </style>
@@ -194,7 +196,6 @@
   <div class="header-title">📡 LIVE CAM Animal Decoder</div>
 
   <div class="camera-container">
-    <!-- 🔊 하울링 방지를 위해 muted 속성 추가 -->
     <video id="webcam" playsinline muted controls style="display:none;"></video>
     <div class="camera-overlay">
       <div class="rec-status">
@@ -212,11 +213,6 @@
     <input type="file" id="file-input" accept="video/*" onchange="handleFileSelect(event)" style="display:none;">
   </div>
 
-  <div class="debug-box">
-    <div class="debug-title">📸 AI 전송 캡처 프레임:</div>
-    <img id="debug-img" alt="캡처 이미지">
-  </div>
-
   <div id="translator-terminal">
     <div class="terminal-header">
       <div class="terminal-buttons">
@@ -224,10 +220,10 @@
         <span class="dot dot-yellow"></span>
         <span class="dot dot-green"></span>
       </div>
+      <!-- 📌 진행 상황 상단 한 줄 코멘트 노출 위치 -->
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 라이브 카메라를 시작하거나 동물 동영상을 업로드하세요.</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -242,23 +238,33 @@
     const canvas = document.getElementById('frame-canvas');
     const statusHeader = document.getElementById('terminal-status');
     const historyContainer = document.getElementById('history-container');
-    const statusLine = document.getElementById('status-line');
     const terminalBody = document.getElementById('terminal-body');
     const soundMeterFill = document.getElementById('sound-meter-fill');
     const overlayText = document.getElementById('overlay-text');
     const fileInput = document.getElementById('file-input');
-    const debugImg = document.getElementById('debug-img');
 
     let isLiveActive = false;
     let isAnalyzing = false;
     let mediaStream = null;
     let audioContext = null;
     let analyser = null;
-    let microphone = null;
+    let micSourceNode = null;
+    let videoSourceNode = null;
     let activeMode = 'none';
 
     const SOUND_THRESHOLD = 20;
     const ANALYSIS_DURATION = 3000;
+
+    function initAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+      }
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+    }
 
     async function toggleCamera() {
       if (isLiveActive) {
@@ -272,7 +278,7 @@
       stopCamera();
 
       try {
-        statusHeader.innerText = 'Listening..';
+        logStatus('Listening.. 동물이 소리를 내면 감지합니다.');
 
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
@@ -281,15 +287,16 @@
 
         video.style.display = 'block';
         video.controls = false;
-        video.muted = true; // 🔊 하울링 방지 소리 소음 강제 차단
+        video.muted = true;
         video.srcObject = mediaStream;
         await video.play();
 
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        microphone = audioContext.createMediaStreamSource(mediaStream);
-        microphone.connect(analyser);
+        initAudioContext();
+        try { analyser.disconnect(); } catch(e){}
+
+        if (micSourceNode) micSourceNode.disconnect();
+        micSourceNode = audioContext.createMediaStreamSource(mediaStream);
+        micSourceNode.connect(analyser);
 
         isLiveActive = true;
         activeMode = 'camera';
@@ -299,12 +306,11 @@
         btnCamera.innerText = '⏹️ 카메라 중지';
         btnCamera.classList.add('active');
 
-        logStatus('> 동물 소리 감지 대기 중... 동물이 울면 자동으로 번역합니다.');
         monitorVolume();
 
       } catch (err) {
         console.error("카메라 연결 에러:", err);
-        logStatus('> [에러] 카메라 및 마이크 권한을 허용해 주세요.');
+        logStatus('[에러] 카메라 및 마이크 권한 거부됨');
       }
     }
 
@@ -314,9 +320,6 @@
 
       if (mediaStream) {
         mediaStream.getTracks().forEach(track => track.stop());
-      }
-      if (audioContext) {
-        audioContext.close();
       }
 
       video.pause();
@@ -329,7 +332,7 @@
 
       soundMeterFill.style.width = '0%';
       overlayText.innerText = 'OFFLINE';
-      statusHeader.innerText = 'Ready..';
+      logStatus('Ready.. 대기 중');
     }
 
     function triggerFileUpload() {
@@ -348,23 +351,31 @@
         activeMode = 'video';
         video.style.display = 'block';
         video.controls = true;
-        video.muted = false; // 업로드 영상은 음성 청취 허용
+        video.muted = false;
         video.src = fileUrl;
         overlayText.innerText = 'VIDEO FILE';
-        logStatus('> 동영상을 불러왔습니다. 재생(▶) 버튼을 누를 때마다 분석이 실행됩니다.');
+        logStatus('동영상 로드 완료. 재생(▶) 시 자동 번역됩니다.');
 
         video.onplay = function() {
-          setTimeout(() => {
-            if (activeMode === 'video' && !isAnalyzing) {
-              captureAndAnalyze(false);
-            }
-          }, 800);
+          initAudioContext();
+          if (micSourceNode) { try { micSourceNode.disconnect(); } catch(e){} }
+
+          if (!videoSourceNode) {
+            videoSourceNode = audioContext.createMediaElementSource(video);
+          }
+          
+          videoSourceNode.connect(analyser);
+          analyser.connect(audioContext.destination);
+
+          logStatus('동영상 분석 대기 중...');
+          monitorVolume();
         };
       }
     }
 
     function monitorVolume() {
-      if (!isLiveActive || activeMode !== 'camera') return;
+      const isVideoPlaying = (activeMode === 'video' && !video.paused && !video.ended);
+      if (!isLiveActive && !isVideoPlaying) return;
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -380,7 +391,8 @@
       soundMeterFill.style.width = fillPercent + '%';
 
       if (average > SOUND_THRESHOLD && !isAnalyzing) {
-        captureAndAnalyze(true);
+        logStatus(activeMode === 'video' ? '동영상 소리 감지! 분석 중...' : '실시간 소리 감지! 3초간 분석 중...');
+        captureAndAnalyze(activeMode === 'camera');
       } else {
         requestAnimationFrame(monitorVolume);
       }
@@ -405,7 +417,6 @@
       if (isAnalyzing) return;
       isAnalyzing = true;
 
-      statusHeader.innerText = 'Capturing...';
       overlayText.innerText = 'ANALYZING...';
 
       let srcWidth = video.videoWidth || 640;
@@ -432,22 +443,18 @@
       ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
 
       if (checkIsBlackCanvas(ctx, targetWidth, targetHeight)) {
-        logStatus('> 검은 프레임 감지, 0.5초 후 재캡처합니다...');
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 400));
         ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
       }
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       const base64Image = dataUrl.split(',')[1];
 
-      debugImg.src = dataUrl;
-
       let base64Audio = null;
       let audioMimeType = 'audio/webm';
 
       if (hasAudioTrigger && activeMode === 'camera') {
         try {
-          logStatus('> [소리 감지] 3초간 동물 울음소리를 수집 중...');
           const audioTrack = mediaStream.getAudioTracks()[0];
           if (audioTrack && audioTrack.readyState === 'live') {
             const audioOnlyStream = new MediaStream([audioTrack]);
@@ -478,8 +485,7 @@
         }
       }
 
-      statusHeader.innerText = 'AI Analyzing...';
-      logStatus('> [AI 분석 중] 추출된 영상과 동물 소리를 번역하는 중입니다...');
+      logStatus('AI 분석 중... Gemini 전송 완료');
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
@@ -495,39 +501,54 @@
         const data = await response.json();
 
         if (data.success) {
-          statusHeader.innerText = 'Translated!';
-          await addNewTranslationItem(data.breed, data.translation);
+          logStatus('Translated! 번역 완료');
+          // 📌 캡처된 썸네일(dataUrl)을 함께 전달하여 목록 왼쪽에 표시
+          await addNewTranslationItem(data.breed, data.translation, dataUrl);
         } else {
-          statusHeader.innerText = 'Ready..';
           if (data.error) {
-            logStatus('> [서버 메시지] ' + data.error);
+            logStatus('서버 에러: ' + data.error);
           } else {
-            logStatus('> 동물이 탐지되지 않았습니다.');
+            logStatus('동물이 탐지되지 않았습니다.');
           }
         }
 
       } catch (err) {
         console.error("통신 에러:", err);
-        statusHeader.innerText = 'Error..';
-        logStatus('> [통신 에러] 서버 응답을 가져오지 못했습니다.');
+        logStatus('[통신 에러] 응답 실패');
       } finally {
         setTimeout(() => {
           isAnalyzing = false;
-          statusHeader.innerText = isLiveActive ? 'Listening..' : 'Ready..';
           overlayText.innerText = activeMode === 'camera' ? 'LIVE STREAM' : 'VIDEO FILE';
-          if (isLiveActive) requestAnimationFrame(monitorVolume);
-        }, 1500);
+          
+          const isVideoPlaying = (activeMode === 'video' && !video.paused && !video.ended);
+          if (isLiveActive || isVideoPlaying) {
+            logStatus('Listening.. 감지 대기 중');
+            requestAnimationFrame(monitorVolume);
+          } else {
+            logStatus('Ready.. 대기 중');
+          }
+        }, 2000);
       }
     }
 
+    // 📌 상단 타이틀바 영역 한 줄 상태 표시 업데이트 함수
     function logStatus(msg) {
-      statusLine.style.display = 'block';
-      statusLine.innerText = msg;
+      statusHeader.innerText = msg;
     }
 
-    async function addNewTranslationItem(breed, translation) {
+    // 📌 캡처 썸네일 + 품종 + 띄어쓰기된 번역 대사를 한 줄로 조합하여 추가
+    async function addNewTranslationItem(breed, translation, thumbDataUrl) {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'terminal-line-item';
+
+      // 1. 왼쪽 캡처 썸네일 이미지
+      const imgEl = document.createElement('img');
+      imgEl.className = 'item-thumb';
+      imgEl.src = thumbDataUrl;
+
+      // 2. 오른쪽 텍스트 컨테이너
+      const textContainer = document.createElement('div');
+      textContainer.className = 'item-text-container';
 
       const breedSpan = document.createElement('span');
       breedSpan.className = 'breed-text';
@@ -535,20 +556,22 @@
       const transSpan = document.createElement('span');
       transSpan.className = 'trans-text';
 
-      itemDiv.appendChild(breedSpan);
-      itemDiv.appendChild(document.createTextNode(' : '));
-      itemDiv.appendChild(transSpan);
+      textContainer.appendChild(breedSpan);
+      textContainer.appendChild(document.createTextNode(' : '));
+      textContainer.appendChild(transSpan);
+
+      itemDiv.appendChild(imgEl);
+      itemDiv.appendChild(textContainer);
 
       historyContainer.insertBefore(itemDiv, historyContainer.firstChild);
       terminalBody.scrollTop = 0;
 
       await typeText(breedSpan, `> [${breed}]`);
-      await typeText(transSpan, `"${translation}"`);
+      await typeText(transSpan, ` "${translation}"`);
     }
 
     function typeText(element, text, speed = 15) {
       return new Promise((resolve) => {
-        element.innerText = '';
         let index = 0;
 
         function type() {
