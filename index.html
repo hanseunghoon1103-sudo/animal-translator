@@ -49,42 +49,70 @@
     .camera-overlay {
       position: absolute;
       top: 12px; left: 12px;
-      background: rgba(255, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
       color: white;
       font-size: 0.75rem;
       font-weight: bold;
-      padding: 4px 10px;
+      padding: 6px 12px;
       border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 10;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .rec-status {
       display: flex;
       align-items: center;
       gap: 6px;
       font-family: monospace;
-      z-index: 10;
     }
     .rec-dot {
       width: 8px; height: 8px;
-      background-color: #fff;
+      background-color: #38edf8;
       border-radius: 50%;
       animation: pulse 1s infinite;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
-    .btn-start-camera {
+    /* 실시간 음량 감지 바 */
+    .sound-meter {
+      width: 120px;
+      height: 6px;
+      background: #1f293d;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .sound-meter-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #27c93f, #ffbd2e, #ff5f56);
+      transition: width 0.1s ease;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 500px;
       margin-top: 15px;
-      background-color: #238636;
-      color: white;
+    }
+    .btn {
+      flex: 1;
       border: none;
-      padding: 14px 24px;
-      font-size: 1rem;
+      padding: 14px 16px;
+      font-size: 0.95rem;
       font-weight: bold;
       border-radius: 10px;
       cursor: pointer;
-      width: 100%;
-      max-width: 500px;
-      box-shadow: 0 4px 12px rgba(35, 134, 54, 0.4);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       transition: all 0.2s;
     }
-    .btn-start-camera.active { background-color: #da3633; box-shadow: none; }
+    .btn-start-camera { background-color: #238636; color: white; }
+    .btn-start-camera.active { background-color: #da3633; }
+    .btn-manual-scan { background-color: #1f6feb; color: white; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     #translator-terminal {
       width: 100%;
@@ -145,11 +173,20 @@
     <video id="webcam" autoplay playsinline muted></video>
     <img id="frozen-img" alt="마지막 스캔 이미지">
     <div class="camera-overlay">
-      <span class="rec-dot"></span> LIVE SCAN
+      <div class="rec-status">
+        <span class="rec-dot"></span> <span id="overlay-text">LIVE STREAM</span>
+      </div>
+      <!-- 음량 미터기 -->
+      <div class="sound-meter">
+        <div id="sound-meter-fill" class="sound-meter-fill"></div>
+      </div>
     </div>
   </div>
 
-  <button id="btn-camera" class="btn-start-camera" onclick="startLiveCamera()">🎥 실시간 라이브 카메라 시작</button>
+  <div class="btn-group">
+    <button id="btn-camera" class="btn btn-start-camera" onclick="toggleCamera()">🎥 라이브 카메라 시작</button>
+    <button id="btn-manual" class="btn btn-manual-scan" onclick="manualTriggerScan()" disabled>📸 바로 번역</button>
+  </div>
 
   <div id="translator-terminal">
     <div class="terminal-header">
@@ -161,7 +198,7 @@
       <div id="terminal-status" class="terminal-title">Ready..</div>
     </div>
     <div class="terminal-body" id="terminal-body">
-      <div id="status-line" class="status-line">> 동물을 카메라에 비춰주세요...</div>
+      <div id="status-line" class="status-line">> 동물을 카메라에 비추고 울음소리를 내게 해주세요...</div>
       <div id="history-container"></div>
     </div>
   </div>
@@ -169,6 +206,7 @@
   <canvas id="frame-canvas"></canvas>
 
   <script>
+    // 🔗 배포하신 구글 앱스 스크립트 웹앱 URL
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzT_6ruthtyo-o7avG86r0Iuy5y7nNcuzKmY6ANpy_Ym3OK947Z9S_JD-SgOTUA-mqR/exec';
 
     const video = document.getElementById('webcam');
@@ -178,91 +216,195 @@
     const historyContainer = document.getElementById('history-container');
     const statusLine = document.getElementById('status-line');
     const terminalBody = document.getElementById('terminal-body');
+    const soundMeterFill = document.getElementById('sound-meter-fill');
+    const btnManual = document.getElementById('btn-manual');
+    const overlayText = document.getElementById('overlay-text');
 
     let isLiveActive = false;
-    let autoScanTimeout = null;
+    let isAnalyzing = false;
+    let mediaStream = null;
+    let audioContext = null;
+    let analyser = null;
+    let microphone = null;
     let lastDataUrl = '';
 
-    async function startLiveCamera() {
-      const btn = document.getElementById('btn-camera');
+    const SOUND_THRESHOLD = 32; // 소리 감지 민감도 (임계값)
 
+    async function toggleCamera() {
       if (isLiveActive) {
         stopCamera();
-        return;
+      } else {
+        await startCamera();
       }
+    }
 
+    async function startCamera() {
       historyContainer.innerHTML = '';
       statusLine.style.display = 'block';
-      statusLine.innerText = '> 동물을 카메라에 비춰주세요...';
+      statusLine.innerText = '> 동물을 카메라에 비추고 울음소리를 내게 해주세요...';
       frozenImg.style.display = 'none';
 
       try {
-        statusHeader.innerText = 'Ready..';
+        statusHeader.innerText = 'Listening..';
 
-        let stream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
-            audio: false
-          });
-        } catch (fallbackErr) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        }
+        // 비디오 + 오디오 권한 동시 요청
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: true
+        });
 
-        video.srcObject = stream;
+        video.srcObject = mediaStream;
         await video.play();
 
-        isLiveActive = true;
-        btn.innerText = '⏹️ 실시간 스캔 중지';
-        btn.classList.add('active');
+        // Web Audio API 설정 (소리 모니터링용)
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        microphone = audioContext.createMediaStreamSource(mediaStream);
+        microphone.connect(analyser);
 
-        triggerChainedScan();
+        isLiveActive = true;
+        const btnCamera = document.getElementById('btn-camera');
+        btnCamera.innerText = '⏹️ 스캔 중지';
+        btnCamera.classList.add('active');
+        btnManual.disabled = false;
+
+        // 실시간 음량 모니터링 시작
+        monitorVolume();
 
       } catch (err) {
-        console.error("카메라 연결 에러:", err);
+        console.error("카메라/마이크 연결 에러:", err);
+        statusLine.innerText = '> [에러] 카메라 및 마이크 권한이 필요합니다.';
       }
     }
 
     function stopCamera() {
       isLiveActive = false;
+      isAnalyzing = false;
 
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
       }
-      if (autoScanTimeout) clearTimeout(autoScanTimeout);
+      if (audioContext) {
+        audioContext.close();
+      }
 
       if (lastDataUrl) {
         frozenImg.src = lastDataUrl;
         frozenImg.style.display = 'block';
       }
 
-      const btn = document.getElementById('btn-camera');
-      btn.innerText = '🎥 실시간 라이브 카메라 시작';
-      btn.classList.remove('active');
+      const btnCamera = document.getElementById('btn-camera');
+      btnCamera.innerText = '🎥 라이브 카메라 시작';
+      btnCamera.classList.remove('active');
+      btnManual.disabled = true;
+
       statusHeader.innerText = 'Ready..';
+      soundMeterFill.style.width = '0%';
+      overlayText.innerText = 'OFFLINE';
     }
 
-    async function triggerChainedScan() {
-      if (!isLiveActive || video.videoWidth === 0) return;
+    // Web Audio API를 활용한 실시간 음량 모니터링
+    function monitorVolume() {
+      if (!isLiveActive) return;
 
-      statusHeader.innerText = 'AI Scanning...';
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
 
-      // 선명한 640x480 해상도로 캡처
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      let average = sum / bufferLength;
+
+      // 게이지 UI 업데이트
+      const fillPercent = Math.min(100, (average / 70) * 100);
+      soundMeterFill.style.width = fillPercent + '%';
+
+      // 소리가 임계값을 넘고 분석 중이 아닐 때 자동 번역 시작
+      if (average > SOUND_THRESHOLD && !isAnalyzing) {
+        console.log("🔊 소리 감지됨! (음량:", average, ")");
+        captureAndAnalyze(true);
+      } else {
+        requestAnimationFrame(monitorVolume);
+      }
+    }
+
+    // 수동 스캔 버튼 동작
+    function manualTriggerScan() {
+      if (!isLiveActive || isAnalyzing) return;
+      captureAndAnalyze(false); // 소리 감지 없이 수동 즉시 분석
+    }
+
+    async function captureAndAnalyze(hasAudioTrigger) {
+      if (isAnalyzing || !isLiveActive) return;
+      isAnalyzing = true;
+
+      overlayText.innerText = hasAudioTrigger ? 'VOICE RECORDING...' : 'CAPTURING...';
+      statusHeader.innerText = hasAudioTrigger ? 'Listening Voice...' : 'Capturing...';
+
+      // 1. 영상 캡처
       canvas.width = 640;
       canvas.height = 480;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
       lastDataUrl = canvas.toDataURL('image/jpeg', 0.7);
       const base64Image = lastDataUrl.split(',')[1];
 
-      let nextDelay = 1500; // 카메라 초점 및 서버 보호를 위한 1.5초 주기
+      // 2. 오디오 녹음 (소리 감지 시 1.2초간 녹음)
+      let base64Audio = null;
+      let audioMimeType = 'audio/webm';
+
+      if (hasAudioTrigger) {
+        try {
+          const audioTrack = mediaStream.getAudioTracks()[0];
+          if (audioTrack && audioTrack.readyState === 'live') {
+            const audioOnlyStream = new MediaStream([audioTrack]);
+
+            if (MediaRecorder.isTypeSupported('audio/webm')) audioMimeType = 'audio/webm';
+            else if (MediaRecorder.isTypeSupported('audio/mp4')) audioMimeType = 'audio/mp4';
+
+            const recorder = new MediaRecorder(audioOnlyStream, { mimeType: audioMimeType });
+            const chunks = [];
+
+            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+            const recordPromise = new Promise(resolve => {
+              recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: audioMimeType });
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  base64Audio = reader.result.split(',')[1];
+                  resolve();
+                };
+                reader.readAsDataURL(blob);
+              };
+            });
+
+            recorder.start();
+            await new Promise(r => setTimeout(r, 1200)); // 1.2초 동안 소리 수집
+            recorder.stop();
+            await recordPromise;
+          }
+        } catch (e) {
+          console.warn("오디오 녹음 실패, 이미지 전용으로 전환:", e);
+        }
+      }
+
+      // 3. 백엔드로 데이터 송신
+      statusHeader.innerText = 'AI Analyzing...';
+      overlayText.innerText = 'ANALYZING...';
 
       try {
         const response = await fetch(APPS_SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ imageBase64: base64Image })
+          body: JSON.stringify({
+            imageBase64: base64Image,
+            audioBase64: base64Audio,
+            audioMimeType: audioMimeType
+          })
         });
 
         const data = await response.json();
@@ -270,37 +412,36 @@
         if (!isLiveActive) return;
 
         if (data.success) {
-          statusHeader.innerText = 'Translated.';
+          statusHeader.innerText = 'Translated!';
           statusLine.style.display = 'none';
           await addNewTranslationItem(data.breed, data.translation);
-          nextDelay = 1200; // 결과 확인 후 다음 스캔까지 1.2초 대기
-
         } else {
           if (data.isNoAnimal) {
             statusHeader.innerText = 'Searching..';
             statusLine.style.display = 'block';
-            statusLine.innerText = '> 화면에 동물이 탐지되지 않았습니다.';
-            nextDelay = 1500; // 동물이 없을 때도 1.5초 여유를 주고 다시 촬영
+            statusLine.innerText = '> 화면이나 소리에서 동물이 탐지되지 않았습니다.';
           } else {
             statusHeader.innerText = 'Ready..';
             statusLine.style.display = 'block';
             statusLine.innerText = '> [안내] ' + (data.error || "재시도 중...");
-            nextDelay = 2000;
           }
         }
 
       } catch (err) {
         console.error("통신 에러:", err);
-        if (isLiveActive) {
-          statusHeader.innerText = 'Ready..';
-          statusLine.style.display = 'block';
-          statusLine.innerText = '> [연결 재시도 중...]';
-          nextDelay = 1500;
-        }
+        statusHeader.innerText = 'Error..';
+        statusLine.style.display = 'block';
+        statusLine.innerText = '> [연결 재시도 중...]';
       } finally {
-        if (isLiveActive) {
-          autoScanTimeout = setTimeout(triggerChainedScan, nextDelay);
-        }
+        // 분석 완료 후 2초간 쿨타임(연속 중복 호출 방지)을 가진 뒤 음량 감지 재개
+        setTimeout(() => {
+          isAnalyzing = false;
+          if (isLiveActive) {
+            statusHeader.innerText = 'Listening..';
+            overlayText.innerText = 'LIVE STREAM';
+            requestAnimationFrame(monitorVolume);
+          }
+        }, 2000);
       }
     }
 
